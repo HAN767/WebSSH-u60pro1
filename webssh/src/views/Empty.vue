@@ -320,43 +320,72 @@
           <h3 class="hd">
             <img style="width: 24px" :src="NetworkIcon" alt="" />NR 5G 信号
           </h3>
-          <span v-if="networkType != '5G'" class="tag warning">未激活</span>
-          <span v-else class="tag success">已激活</span>
+          <div class="card-tags">
+            <span v-if="networkType != '5G'" class="tag warning">未激活</span>
+            <span v-else class="tag success">已激活</span>
+            <span :class="['tag', getNetworkSignalStatus('nr').className]">
+              信号{{ getNetworkSignalStatus('nr').text }}
+            </span>
+          </div>
         </div>
         <div class="card-content">
           <div class="signal-grid">
             <div class="signal-item">
-              <span class="label">RSRP</span>
+              <div class="signal-label-row">
+                <span class="label">RSRP</span>
+                <span :class="['signal-status', getSignalStatus('rsrp', d.nr5g_rsrp).className]">
+                  {{ getSignalStatus('rsrp', d.nr5g_rsrp).text }}
+                </span>
+              </div>
               <div class="progress-bar">
                 <div
                   class="progress-fill"
+                  :class="getSignalStatus('rsrp', d.nr5g_rsrp).className"
                   :style="{ width: getRsrpPercent(d.nr5g_rsrp) + '%' }"></div>
                 <span class="progress-text">{{ formatDbm(d.nr5g_rsrp) }}</span>
               </div>
             </div>
             <div class="signal-item">
-              <span class="label">RSRQ</span>
+              <div class="signal-label-row">
+                <span class="label">RSRQ</span>
+                <span :class="['signal-status', getSignalStatus('rsrq', d.nr5g_rsrq).className]">
+                  {{ getSignalStatus('rsrq', d.nr5g_rsrq).text }}
+                </span>
+              </div>
               <div class="progress-bar">
                 <div
                   class="progress-fill"
+                  :class="getSignalStatus('rsrq', d.nr5g_rsrq).className"
                   :style="{ width: getRsrqPercent(d.nr5g_rsrq) + '%' }"></div>
                 <span class="progress-text">{{ formatDb(d.nr5g_rsrq) }}</span>
               </div>
             </div>
             <div class="signal-item">
-              <span class="label">SINR</span>
+              <div class="signal-label-row">
+                <span class="label">SINR</span>
+                <span :class="['signal-status', getSignalStatus('sinr', d.nr5g_snr).className]">
+                  {{ getSignalStatus('sinr', d.nr5g_snr).text }}
+                </span>
+              </div>
               <div class="progress-bar">
                 <div
                   class="progress-fill"
+                  :class="getSignalStatus('sinr', d.nr5g_snr).className"
                   :style="{ width: getSnrPercent(d.nr5g_snr) + '%' }"></div>
                 <span class="progress-text">{{ formatSnr(d.nr5g_snr) }}</span>
               </div>
             </div>
             <div class="signal-item">
-              <span class="label">RSSI</span>
+              <div class="signal-label-row">
+                <span class="label">RSSI</span>
+                <span :class="['signal-status', getSignalStatus('rssi', d.nr5g_rssi).className]">
+                  {{ getSignalStatus('rssi', d.nr5g_rssi).text }}
+                </span>
+              </div>
               <div class="progress-bar">
                 <div
                   class="progress-fill"
+                  :class="getSignalStatus('rssi', d.nr5g_rssi).className"
                   :style="{ width: getRssiPercent(d.nr5g_rssi) + '%' }"></div>
                 <span class="progress-text">{{ formatDbm(d.nr5g_rssi) }}</span>
               </div>
@@ -380,44 +409,73 @@
           <h3 class="hd">
             <img style="width: 24px" :src="NetworkIcon" alt="" />LTE 信号
           </h3>
-          <span v-if="networkType != '4G'" class="tag warning">未激活</span>
-          <span v-else class="tag success">已激活</span>
+          <div class="card-tags">
+            <span v-if="networkType != '4G'" class="tag warning">未激活</span>
+            <span v-else class="tag success">已激活</span>
+            <span :class="['tag', getNetworkSignalStatus('lte').className]">
+              信号{{ getNetworkSignalStatus('lte').text }}
+            </span>
+          </div>
         </div>
         <div class="card-content">
           <div class="signal-grid">
 
             <div class="signal-item">
-              <span class="label">RSRP</span>
+              <div class="signal-label-row">
+                <span class="label">RSRP</span>
+                <span :class="['signal-status', getSignalStatus('rsrp', d.lte_rsrp).className]">
+                  {{ getSignalStatus('rsrp', d.lte_rsrp).text }}
+                </span>
+              </div>
               <div class="progress-bar">
                 <div
                   class="progress-fill"
+                  :class="getSignalStatus('rsrp', d.lte_rsrp).className"
                   :style="{ width: getRsrpPercent(d.lte_rsrp) + '%' }"></div>
                 <span class="progress-text">{{ formatDbm(d.lte_rsrp) }}</span>
               </div>
             </div>
             <div class="signal-item">
-              <span class="label">RSRQ</span>
+              <div class="signal-label-row">
+                <span class="label">RSRQ</span>
+                <span :class="['signal-status', getSignalStatus('rsrq', d.lte_rsrq).className]">
+                  {{ getSignalStatus('rsrq', d.lte_rsrq).text }}
+                </span>
+              </div>
               <div class="progress-bar">
                 <div
                   class="progress-fill"
+                  :class="getSignalStatus('rsrq', d.lte_rsrq).className"
                   :style="{ width: getRsrqPercent(d.lte_rsrq) + '%' }"></div>
                 <span class="progress-text">{{ formatDb(d.lte_rsrq) }}</span>
               </div>
             </div>
             <div class="signal-item">
-              <span class="label">SINR</span>
+              <div class="signal-label-row">
+                <span class="label">SINR</span>
+                <span :class="['signal-status', getSignalStatus('sinr', d.lte_snr).className]">
+                  {{ getSignalStatus('sinr', d.lte_snr).text }}
+                </span>
+              </div>
               <div class="progress-bar">
                 <div
                   class="progress-fill"
+                  :class="getSignalStatus('sinr', d.lte_snr).className"
                   :style="{ width: getSnrPercent(d.lte_snr) + '%' }"></div>
                 <span class="progress-text">{{ formatSnr(d.lte_snr) }}</span>
               </div>
             </div>
             <div class="signal-item">
-              <span class="label">RSSI</span>
+              <div class="signal-label-row">
+                <span class="label">RSSI</span>
+                <span :class="['signal-status', getSignalStatus('rssi', d.lte_rssi).className]">
+                  {{ getSignalStatus('rssi', d.lte_rssi).text }}
+                </span>
+              </div>
               <div class="progress-bar">
                 <div
                   class="progress-fill"
+                  :class="getSignalStatus('rssi', d.lte_rssi).className"
                   :style="{ width: getRssiPercent(d.lte_rssi) + '%' }"></div>
                 <span class="progress-text">{{ formatDbm(d.lte_rssi) }}</span>
               </div>
@@ -1640,6 +1698,89 @@ function getSnrPercent(snr: number): number {
   return Math.round(percent);
 }
 
+type SignalMetric = 'rsrp' | 'rsrq' | 'sinr' | 'rssi';
+type SignalGrade = 'excellent' | 'good' | 'fair' | 'poor' | 'unknown';
+
+interface SignalStatus {
+  text: string;
+  className: SignalGrade;
+  score: number;
+}
+
+const signalStatusMap: Record<SignalGrade, SignalStatus> = {
+  excellent: { text: '优秀', className: 'excellent', score: 4 },
+  good: { text: '良好', className: 'good', score: 3 },
+  fair: { text: '一般', className: 'fair', score: 2 },
+  poor: { text: '较差', className: 'poor', score: 1 },
+  unknown: { text: '未知', className: 'unknown', score: 0 },
+};
+
+function getSignalStatus(metric: SignalMetric, rawValue: unknown): SignalStatus {
+  if (rawValue === null || rawValue === undefined || rawValue === '') {
+    return signalStatusMap.unknown;
+  }
+  const value = Number(rawValue);
+  if (!Number.isFinite(value)) return signalStatusMap.unknown;
+
+  if (metric === 'rsrp') {
+    if (value >= -85) return signalStatusMap.excellent;
+    if (value >= -95) return signalStatusMap.good;
+    if (value >= -105) return signalStatusMap.fair;
+    return signalStatusMap.poor;
+  }
+
+  if (metric === 'rsrq') {
+    if (value >= -8) return signalStatusMap.excellent;
+    if (value >= -11) return signalStatusMap.good;
+    if (value >= -15) return signalStatusMap.fair;
+    return signalStatusMap.poor;
+  }
+
+  if (metric === 'sinr') {
+    if (value >= 20) return signalStatusMap.excellent;
+    if (value >= 13) return signalStatusMap.good;
+    if (value >= 0) return signalStatusMap.fair;
+    return signalStatusMap.poor;
+  }
+
+  if (value >= -65) return signalStatusMap.excellent;
+  if (value >= -75) return signalStatusMap.good;
+  if (value >= -85) return signalStatusMap.fair;
+  return signalStatusMap.poor;
+}
+
+function getAverageSignalStatus(statuses: SignalStatus[]): SignalStatus {
+  const validStatuses = statuses.filter(item => item.className !== 'unknown');
+  if (!validStatuses.length) return signalStatusMap.unknown;
+
+  const averageScore =
+    validStatuses.reduce((total, item) => total + item.score, 0) /
+    validStatuses.length;
+
+  if (averageScore >= 3.5) return signalStatusMap.excellent;
+  if (averageScore >= 2.5) return signalStatusMap.good;
+  if (averageScore >= 1.5) return signalStatusMap.fair;
+  return signalStatusMap.poor;
+}
+
+function getNetworkSignalStatus(type: 'nr' | 'lte'): SignalStatus {
+  if (type === 'nr') {
+    return getAverageSignalStatus([
+      getSignalStatus('rsrp', d.value.nr5g_rsrp),
+      getSignalStatus('rsrq', d.value.nr5g_rsrq),
+      getSignalStatus('sinr', d.value.nr5g_snr),
+      getSignalStatus('rssi', d.value.nr5g_rssi),
+    ]);
+  }
+
+  return getAverageSignalStatus([
+    getSignalStatus('rsrp', d.value.lte_rsrp),
+    getSignalStatus('rsrq', d.value.lte_rsrq),
+    getSignalStatus('sinr', d.value.lte_snr),
+    getSignalStatus('rssi', d.value.lte_rssi),
+  ]);
+}
+
 // 获取载波信息
 function formatNrca(nrca: string, pre: string, type: number, index: number): string {
   if (!nrca) return '-';
@@ -2257,6 +2398,14 @@ onUnmounted(() => {
   margin: 0;
 }
 
+.card-tags {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .card-content {
   padding: 16px;
   display: flex;
@@ -2472,6 +2621,36 @@ onUnmounted(() => {
   border: 1px solid rgba(229, 62, 62, 0.3);
 }
 
+.tag.excellent {
+  background: rgba(72, 187, 120, 0.22);
+  color: #7ee787;
+  border: 1px solid rgba(72, 187, 120, 0.35);
+}
+
+.tag.good {
+  background: rgba(56, 189, 248, 0.18);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.34);
+}
+
+.tag.fair {
+  background: rgba(237, 137, 54, 0.2);
+  color: #f6ad55;
+  border: 1px solid rgba(237, 137, 54, 0.3);
+}
+
+.tag.poor {
+  background: rgba(229, 62, 62, 0.2);
+  color: #fc8181;
+  border: 1px solid rgba(229, 62, 62, 0.3);
+}
+
+.tag.unknown {
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+}
+
 /* 信号进度条 */
 .signal-grid {
   display: grid;
@@ -2485,6 +2664,51 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.signal-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.signal-status {
+  flex: 0 0 auto;
+  min-width: 38px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.signal-status.excellent {
+  background: rgba(72, 187, 120, 0.18);
+  color: #7ee787;
+}
+
+.signal-status.good {
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+}
+
+.signal-status.fair {
+  background: rgba(237, 137, 54, 0.18);
+  color: #f6ad55;
+}
+
+.signal-status.poor {
+  background: rgba(229, 62, 62, 0.18);
+  color: #fc8181;
+}
+
+.signal-status.unknown {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+}
+
 .progress-bar {
   position: relative;
   height: 24px;
@@ -2496,15 +2720,30 @@ onUnmounted(() => {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(
-    90deg,
-    #62718abb 0%,
-    #68d391bb 50%,
-    #63b3edbb 100%
-  );
+  background: linear-gradient(90deg, #64748bbb 0%, #38bdf8bb 100%);
   border-radius: 12px;
   transition: width 0.3s ease;
   position: relative;
+}
+
+.progress-fill.excellent {
+  background: linear-gradient(90deg, #2f855abb 0%, #68d391dd 100%);
+}
+
+.progress-fill.good {
+  background: linear-gradient(90deg, #0f766ebb 0%, #38bdf8dd 100%);
+}
+
+.progress-fill.fair {
+  background: linear-gradient(90deg, #8a5a1fbb 0%, #f6ad55dd 100%);
+}
+
+.progress-fill.poor {
+  background: linear-gradient(90deg, #7f1d1dbb 0%, #fc8181dd 100%);
+}
+
+.progress-fill.unknown {
+  background: linear-gradient(90deg, #475569bb 0%, #94a3b8bb 100%);
 }
 
 .progress-text {
