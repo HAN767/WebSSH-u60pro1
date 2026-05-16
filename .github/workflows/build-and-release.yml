@@ -92,4 +92,4 @@ jobs:
             gossh/webssh_${{ steps.version.outputs.version }}
             version.txt
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
