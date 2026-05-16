@@ -29,14 +29,11 @@ jobs:
         with:
           node-version: 24
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
       # 4. 构建前端
       - name: Build webssh
         run: |
           cd webssh
-          pnpm install --unsafe-perm
+          npm install
           npm run buildOnly
 
       # 5. 拷贝 dist → webroot
