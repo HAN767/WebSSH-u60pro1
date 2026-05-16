@@ -158,6 +158,73 @@
 
           <div>
             <el-dialog
+              v-model="updateProgressDialogVisible"
+              title="正在更新 WebSSH"
+              width="92%"
+              style="max-width: 460px;"
+              custom-class="modern-dialog update-progress-dialog"
+              :close-on-click-modal="false"
+              :close-on-press-escape="false"
+              :show-close="updateProgress.state === 'failed'"
+            >
+              <div class="update-progress-panel">
+                <div class="update-status-line">
+                  <span class="update-status-title">{{ updateProgress.msg || updateStateText }}</span>
+                  <el-tag :type="updateProgress.state === 'failed' ? 'danger' : 'primary'" effect="dark">
+                    {{ updateStateText }}
+                  </el-tag>
+                </div>
+
+                <el-progress
+                  :percentage="updatePercent"
+                  :status="updateProgress.state === 'failed' ? 'exception' : updateProgress.state === 'restarting' ? 'success' : undefined"
+                  :stroke-width="12"
+                  striped
+                  striped-flow
+                />
+
+                <div class="update-meta-grid">
+                  <div class="update-meta-item">
+                    <span>连接方式</span>
+                    <strong>{{ updateProgress.mode || "等待连接" }}</strong>
+                  </div>
+                  <div class="update-meta-item">
+                    <span>请求域名</span>
+                    <strong>{{ updateProgress.domain || "-" }}</strong>
+                  </div>
+                  <div class="update-meta-item">
+                    <span>更新文件</span>
+                    <strong>{{ updateProgress.asset_name || "-" }}</strong>
+                  </div>
+                  <div class="update-meta-item">
+                    <span>文件大小</span>
+                    <strong>{{ formatUpdateSize(updateProgress.total) }}</strong>
+                  </div>
+                </div>
+
+                <div class="update-transfer">
+                  <span>{{ formatUpdateSize(updateProgress.downloaded) }} / {{ formatUpdateSize(updateProgress.total) }}</span>
+                  <span>{{ updatePercent }}%</span>
+                </div>
+              </div>
+
+              <template #footer>
+                <div class="dialog-footer">
+                  <el-button
+                    v-if="updateProgress.state === 'failed'"
+                    type="primary"
+                    @click="updateProgressDialogVisible = false"
+                  >
+                    关闭
+                  </el-button>
+                  <el-button v-else disabled>
+                    更新过程中请不要关闭页面
+                  </el-button>
+                </div>
+              </template>
+            </el-dialog>
+
+            <el-dialog
               :title="'主机管理'"
               v-model="data.modify_devices_dialog_visible"
               :width="'95%'"
@@ -763,6 +830,140 @@ const filterHostTable = computed(() =>
 
 // 检查更新
 const chkingUpdate = ref(false);
+const updateProgressDialogVisible = ref(false);
+let updateStatusTimer = 0;
+
+interface UpdateProgressInfo {
+  state: "idle" | "starting" | "downloading" | "installing" | "restarting" | "failed" | string;
+  msg: string;
+  mode: string;
+  domain: string;
+  url: string;
+  asset_name: string;
+  downloaded: number;
+  total: number;
+  percent: number;
+  current_version: string;
+  latest_version: string;
+  release_url: string;
+}
+
+const updateProgress = reactive<UpdateProgressInfo>({
+  state: "idle",
+  msg: "",
+  mode: "",
+  domain: "",
+  url: "",
+  asset_name: "",
+  downloaded: 0,
+  total: 0,
+  percent: 0,
+  current_version: "",
+  latest_version: "",
+  release_url: "",
+});
+
+const updatePercent = computed(() => {
+  const percent = Number(updateProgress.percent || 0);
+  if (Number.isFinite(percent)) {
+    return Math.max(0, Math.min(100, Math.round(percent)));
+  }
+
+  if (updateProgress.total > 0) {
+    return Math.max(0, Math.min(100, Math.round(updateProgress.downloaded * 100 / updateProgress.total)));
+  }
+
+  return 0;
+});
+
+const updateStateText = computed(() => {
+  switch (updateProgress.state) {
+    case "starting":
+      return "准备中";
+    case "downloading":
+      return "下载中";
+    case "installing":
+      return "准备安装";
+    case "restarting":
+      return "即将重启";
+    case "failed":
+      return "更新失败";
+    default:
+      return "等待中";
+  }
+});
+
+function formatUpdateSize(size?: number) {
+  const bytes = Number(size || 0);
+  if (!bytes || bytes < 0) return "-";
+
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value = value / 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function escapeHtml(value: any) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function updateProgressFromStatus(status: any) {
+  if (!status) return;
+  Object.assign(updateProgress, {
+    state: status.state || "idle",
+    msg: status.msg || "",
+    mode: status.mode || "",
+    domain: status.domain || "",
+    url: status.url || "",
+    asset_name: status.asset_name || "",
+    downloaded: Number(status.downloaded || 0),
+    total: Number(status.total || 0),
+    percent: Number(status.percent || 0),
+    current_version: status.current_version || "",
+    latest_version: status.latest_version || "",
+    release_url: status.release_url || "",
+  });
+}
+
+function stopUpdateStatusPolling() {
+  if (updateStatusTimer) {
+    clearInterval(updateStatusTimer);
+    updateStatusTimer = 0;
+  }
+}
+
+async function refreshUpdateStatus() {
+  try {
+    const ret = await axios.get<ResponseData>("/api/update/status");
+    if (ret.data.code === 0) {
+      updateProgressFromStatus(ret.data.data);
+      if (["failed", "restarting"].includes(updateProgress.state)) {
+        stopUpdateStatusPolling();
+      }
+    }
+  } catch (err) {
+    console.log(err);
+    if (updateProgress.state !== "restarting") {
+      updateProgress.msg = "连接已中断，程序可能正在重启";
+    }
+    stopUpdateStatusPolling();
+  }
+}
+
+function startUpdateStatusPolling() {
+  stopUpdateStatusPolling();
+  refreshUpdateStatus();
+  updateStatusTimer = window.setInterval(refreshUpdateStatus, 700);
+}
 
 async function checkUpdate() {
   if (chkingUpdate.value) return;
@@ -785,19 +986,29 @@ async function checkUpdate() {
     }
 
     await ElMessageBox.confirm(
-      `
-      当前版本：${info.current_version}
-      最新版本：${info.latest_version}
-      更新文件：${info.asset_name || "-"}
-      
-      确认现在更新吗？
-      `,
+      `<div class="update-confirm-card">
+        <div class="update-confirm-head">
+          <div>
+            <div class="update-confirm-kicker">发现可用更新</div>
+            <div class="update-confirm-version">${escapeHtml(info.latest_version)}</div>
+          </div>
+          <span>NEW</span>
+        </div>
+        <div class="update-confirm-grid">
+          <div><label>当前版本</label><strong>${escapeHtml(info.current_version)}</strong></div>
+          <div><label>最新版本</label><strong>${escapeHtml(info.latest_version)}</strong></div>
+          <div><label>更新文件</label><strong>${escapeHtml(info.asset_name || "-")}</strong></div>
+          <div><label>文件大小</label><strong>${formatUpdateSize(info.asset_size)}</strong></div>
+        </div>
+        <p>确认后将开始下载更新文件，下载期间会显示连接方式、请求域名和实时进度。</p>
+      </div>`,
       "发现新版本",
       {
         confirmButtonText: "确认更新",
         cancelButtonText: "取消",
         type: "warning",
-        dangerouslyUseHTMLString: false,
+        customClass: "update-confirm-message",
+        dangerouslyUseHTMLString: true,
       }
     );
 
@@ -817,20 +1028,38 @@ async function checkUpdate() {
 // 执行更新
 async function runUpdate() {
   try {
+    updateProgressDialogVisible.value = true;
+    Object.assign(updateProgress, {
+      state: "starting",
+      msg: "正在提交更新任务",
+      mode: "",
+      domain: "",
+      url: "",
+      downloaded: 0,
+      percent: 0,
+    });
+
     const ret = await axios.post<ResponseData>("/api/update/run");
 
     if (ret.data.code === 0) {
+      updateProgressFromStatus(ret.data.data);
+      startUpdateStatusPolling();
       ElNotification({
         title: "更新已开始",
         type: "success",
-        duration: 8000,
-        message: ret.data.msg || "程序即将重启，请稍后刷新页面",
+        duration: 5000,
+        message: ret.data.msg || "正在下载更新文件",
       });
     } else {
+      updateProgressFromStatus(ret.data.data);
+      updateProgress.state = "failed";
+      updateProgress.msg = ret.data.msg || "启动更新失败";
       ElMessage.error(ret.data.msg || "启动更新失败");
     }
   } catch (err) {
     console.log(err);
+    updateProgress.state = "failed";
+    updateProgress.msg = "执行更新异常，可能程序正在重启";
     ElMessage.error("执行更新异常，可能程序正在重启");
   }
 }
@@ -1916,6 +2145,7 @@ onMounted(() => {
  */
 onBeforeUnmount(() => {
   clearInterval(statusSetInterval);
+  stopUpdateStatusPolling();
   disconnectAllSession();
   window.removeEventListener("resize", updateWindowWidth);
   window.onbeforeunload = null;
@@ -2189,6 +2419,161 @@ const terminalBackground = computed(() => {
 :deep(.modern-dialog .el-button:hover) {
   transform: translateY(-1px);
 }
+
+.update-progress-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.update-status-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.update-status-title {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.update-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.update-meta-item {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.16);
+}
+
+.update-meta-item span {
+  display: block;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.update-meta-item strong {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.update-transfer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+:global(.update-confirm-message) {
+  width: min(92vw, 460px);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+:global(.update-confirm-message .el-message-box__header) {
+  padding: 18px 20px 8px;
+}
+
+:global(.update-confirm-message .el-message-box__content) {
+  padding: 10px 20px 6px;
+}
+
+:global(.update-confirm-message .el-message-box__btns) {
+  padding: 12px 20px 18px;
+}
+
+:global(.update-confirm-card) {
+  display: grid;
+  gap: 14px;
+}
+
+:global(.update-confirm-head) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(16, 185, 129, 0.1));
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.16) inset;
+}
+
+:global(.update-confirm-head span) {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+:global(.update-confirm-kicker) {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+:global(.update-confirm-version) {
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+:global(.update-confirm-grid) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+:global(.update-confirm-grid div) {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.16);
+}
+
+:global(.update-confirm-grid label) {
+  display: block;
+  margin-bottom: 5px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+:global(.update-confirm-grid strong) {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+:global(.update-confirm-card p) {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 @media (max-width: 768px) {
   .nav .right {
     text-align: left !important;
@@ -2204,6 +2589,11 @@ const terminalBackground = computed(() => {
 
   :deep(.modern-dialog .el-dialog__footer) {
     padding: 12px 14px 16px;
+  }
+
+  .update-meta-grid,
+  :global(.update-confirm-grid) {
+    grid-template-columns: 1fr;
   }
 
   .nav :deep(.el-button-group) {

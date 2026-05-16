@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -21,6 +22,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -51,6 +53,51 @@ type UpdateVersionInfo struct {
 	ReleaseBody    string `json:"release_body"`
 	AssetName      string `json:"asset_name"`
 	AssetSize      int64  `json:"asset_size"`
+}
+
+type UpdateDownloadStatus struct {
+	State          string `json:"state"`
+	Msg            string `json:"msg"`
+	Mode           string `json:"mode"`
+	Domain         string `json:"domain"`
+	URL            string `json:"url"`
+	AssetName      string `json:"asset_name"`
+	Downloaded     int64  `json:"downloaded"`
+	Total          int64  `json:"total"`
+	Percent        int    `json:"percent"`
+	CurrentVersion string `json:"current_version"`
+	LatestVersion  string `json:"latest_version"`
+	ReleaseURL     string `json:"release_url"`
+	StartedAt      string `json:"started_at"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+var updateStatusMu sync.RWMutex
+var updateStatus = UpdateDownloadStatus{State: "idle", Msg: "暂无更新任务"}
+
+func getUpdateStatus() UpdateDownloadStatus {
+	updateStatusMu.RLock()
+	defer updateStatusMu.RUnlock()
+	return updateStatus
+}
+
+func setUpdateStatus(fn func(*UpdateDownloadStatus)) UpdateDownloadStatus {
+	updateStatusMu.Lock()
+	defer updateStatusMu.Unlock()
+	fn(&updateStatus)
+	updateStatus.UpdatedAt = time.Now().Format(time.RFC3339)
+	if updateStatus.Total > 0 {
+		updateStatus.Percent = int(updateStatus.Downloaded * 100 / updateStatus.Total)
+		if updateStatus.Percent > 100 {
+			updateStatus.Percent = 100
+		}
+	}
+	return updateStatus
+}
+
+func isUpdateBusy() bool {
+	state := getUpdateStatus().State
+	return state == "starting" || state == "downloading" || state == "installing" || state == "restarting"
 }
 
 // 使用go 1.16+ 新特性
@@ -189,13 +236,37 @@ var PROXIES = []string{
 	"https://ghfast.top/",
 }
 
-// downloadFile 支持直连和代理，每次请求单独超时
-func downloadFile(url string, savePath string) error {
+func updateAttemptStatus(rawURL string, originalURL string) {
+	parsed, _ := url.Parse(rawURL)
+	mode := "代理"
+	originalHost := ""
+	if originalParsed, err := url.Parse(originalURL); err == nil {
+		originalHost = originalParsed.Host
+	}
+	if parsed != nil && parsed.Host == originalHost {
+		mode = "直连"
+	}
+
+	setUpdateStatus(func(status *UpdateDownloadStatus) {
+		status.State = "downloading"
+		status.Msg = "正在下载更新文件"
+		status.Mode = mode
+		if parsed != nil {
+			status.Domain = parsed.Host
+		}
+		status.URL = rawURL
+		status.Downloaded = 0
+		status.Percent = 0
+	})
+}
+
+// downloadFile 支持直连和代理，每次请求单独超时，并记录下载进度
+func downloadFile(downloadURL string, savePath string, totalHint int64) error {
 	// 先构建尝试 URL 列表
-	tryURLs := append([]string{url}, func() []string {
+	tryURLs := append([]string{downloadURL}, func() []string {
 		var proxied []string
 		for _, p := range PROXIES {
-			trimmed := strings.TrimPrefix(url, "https://")
+			trimmed := strings.TrimPrefix(downloadURL, "https://")
 			if !strings.HasSuffix(p, "/") {
 				p += "/"
 			}
@@ -206,7 +277,8 @@ func downloadFile(url string, savePath string) error {
 
 	var lastErr error
 	for _, u := range tryURLs {
-		client := &http.Client{Timeout: 15 * time.Second} // 每次单独 15 秒
+		updateAttemptStatus(u, downloadURL)
+		client := &http.Client{Timeout: 60 * time.Second} // 每次单独 60 秒
 
 		req, err := http.NewRequest(http.MethodGet, u, nil)
 		if err != nil {
@@ -219,12 +291,18 @@ func downloadFile(url string, savePath string) error {
 		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = err
+			setUpdateStatus(func(status *UpdateDownloadStatus) {
+				status.Msg = "当前线路连接失败，正在尝试下一线路"
+			})
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 			resp.Body.Close()
+			setUpdateStatus(func(status *UpdateDownloadStatus) {
+				status.Msg = fmt.Sprintf("当前线路返回 HTTP %d，正在尝试下一线路", resp.StatusCode)
+			})
 			continue
 		}
 
@@ -234,11 +312,51 @@ func downloadFile(url string, savePath string) error {
 			return err
 		}
 
-		_, err = io.Copy(out, resp.Body)
+		total := totalHint
+		if resp.ContentLength > 0 {
+			total = resp.ContentLength
+		}
+		setUpdateStatus(func(status *UpdateDownloadStatus) {
+			status.Total = total
+			status.Downloaded = 0
+			status.Percent = 0
+			status.Msg = "正在下载更新文件"
+		})
+
+		buf := make([]byte, 64*1024)
+		var downloaded int64
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				written, writeErr := out.Write(buf[:n])
+				downloaded += int64(written)
+				setUpdateStatus(func(status *UpdateDownloadStatus) {
+					status.Downloaded = downloaded
+				})
+				if writeErr != nil {
+					err = writeErr
+					break
+				}
+				if written != n {
+					err = io.ErrShortWrite
+					break
+				}
+			}
+			if readErr == io.EOF {
+				break
+			}
+			if readErr != nil {
+				err = readErr
+				break
+			}
+		}
 		resp.Body.Close()
 		out.Close()
 		if err != nil {
 			lastErr = err
+			setUpdateStatus(func(status *UpdateDownloadStatus) {
+				status.Msg = "当前线路下载中断，正在尝试下一线路"
+			})
 			continue
 		}
 
@@ -249,6 +367,15 @@ func downloadFile(url string, savePath string) error {
 		}
 
 		// 成功下载
+		setUpdateStatus(func(status *UpdateDownloadStatus) {
+			status.State = "installing"
+			status.Msg = "下载完成，正在准备替换程序"
+			status.Downloaded = info.Size()
+			if status.Total <= 0 {
+				status.Total = info.Size()
+			}
+			status.Percent = 100
+		})
 		return nil
 	}
 
@@ -337,7 +464,89 @@ func shellQuote(s string) string {
 	}
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
+
+func UpdateStatusHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "ok",
+		"data": getUpdateStatus(),
+	})
+}
+
+func runUpdateTask(asset *GithubAsset, latestVersion string, releaseURL string) {
+	currentBin, err := os.Executable()
+	if err != nil {
+		setUpdateStatus(func(status *UpdateDownloadStatus) {
+			status.State = "failed"
+			status.Msg = "获取当前二进制路径失败: " + err.Error()
+		})
+		return
+	}
+
+	currentBin, err = filepath.EvalSymlinks(currentBin)
+	if err != nil {
+		setUpdateStatus(func(status *UpdateDownloadStatus) {
+			status.State = "failed"
+			status.Msg = "解析当前二进制真实路径失败: " + err.Error()
+		})
+		return
+	}
+
+	tmpNewBin := filepath.Join(os.TempDir(), fmt.Sprintf("webssh_%s_%s.new", runtime.GOARCH, latestVersion))
+	logFile := filepath.Join(os.TempDir(), "webssh_update.log")
+
+	if err := downloadFile(asset.BrowserDownloadURL, tmpNewBin, asset.Size); err != nil {
+		setUpdateStatus(func(status *UpdateDownloadStatus) {
+			status.State = "failed"
+			status.Msg = "下载新版本失败: " + err.Error()
+		})
+		return
+	}
+
+	if err := os.Chmod(tmpNewBin, 0755); err != nil {
+		setUpdateStatus(func(status *UpdateDownloadStatus) {
+			status.State = "failed"
+			status.Msg = "设置新二进制权限失败: " + err.Error()
+		})
+		return
+	}
+
+	scriptPath, err := createTempUpdateScript(currentBin, tmpNewBin, logFile, os.Args)
+	if err != nil {
+		setUpdateStatus(func(status *UpdateDownloadStatus) {
+			status.State = "failed"
+			status.Msg = "创建临时更新脚本失败: " + err.Error()
+		})
+		return
+	}
+
+	cmd := exec.Command("/bin/sh", scriptPath)
+	if err := cmd.Start(); err != nil {
+		setUpdateStatus(func(status *UpdateDownloadStatus) {
+			status.State = "failed"
+			status.Msg = "启动临时更新脚本失败: " + err.Error()
+		})
+		return
+	}
+
+	setUpdateStatus(func(status *UpdateDownloadStatus) {
+		status.State = "restarting"
+		status.Msg = "更新文件已准备完成，程序即将重启"
+		status.Percent = 100
+		status.ReleaseURL = releaseURL
+	})
+}
+
 func UpdateRunHandler(c *gin.Context) {
+	if isUpdateBusy() {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 1,
+			"msg":  "已有更新任务正在进行",
+			"data": getUpdateStatus(),
+		})
+		return
+	}
+
 	release, err := getLatestGithubRelease()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -371,73 +580,25 @@ func UpdateRunHandler(c *gin.Context) {
 		return
 	}
 
-	currentBin, err := os.Executable()
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 1,
-			"msg":  "获取当前二进制路径失败: " + err.Error(),
-		})
-		return
-	}
+	setUpdateStatus(func(status *UpdateDownloadStatus) {
+		*status = UpdateDownloadStatus{
+			State:          "starting",
+			Msg:            "正在准备更新任务",
+			AssetName:      asset.Name,
+			Total:          asset.Size,
+			CurrentVersion: currentVersion,
+			LatestVersion:  latestVersion,
+			ReleaseURL:     release.HTMLURL,
+			StartedAt:      time.Now().Format(time.RFC3339),
+		}
+	})
 
-	currentBin, err = filepath.EvalSymlinks(currentBin)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 1,
-			"msg":  "解析当前二进制真实路径失败: " + err.Error(),
-		})
-		return
-	}
-
-	tmpNewBin := filepath.Join(os.TempDir(), fmt.Sprintf("webssh_%s_%s.new", runtime.GOARCH, latestVersion))
-	logFile := filepath.Join(os.TempDir(), "webssh_update.log")
-
-	if err := downloadFile(asset.BrowserDownloadURL, tmpNewBin); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 1,
-			"msg":  "下载新版本失败: " + err.Error(),
-		})
-		return
-	}
-
-	if err := os.Chmod(tmpNewBin, 0755); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 1,
-			"msg":  "设置新二进制权限失败: " + err.Error(),
-		})
-		return
-	}
-
-	scriptPath, err := createTempUpdateScript(currentBin, tmpNewBin, logFile, os.Args)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 1,
-			"msg":  "创建临时更新脚本失败: " + err.Error(),
-		})
-		return
-	}
-
-	cmd := exec.Command("/bin/sh", scriptPath)
-
-	if err := cmd.Start(); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 1,
-			"msg":  "启动临时更新脚本失败: " + err.Error(),
-		})
-		return
-	}
+	go runUpdateTask(asset, latestVersion, release.HTMLURL)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
-		"msg":  "已开始更新，程序即将重启",
-		"data": gin.H{
-			"current_version": currentVersion,
-			"latest_version":  latestVersion,
-			"asset_name":      asset.Name,
-			"asset_size":      asset.Size,
-			"log_file":        logFile,
-			"script":          scriptPath,
-		},
+		"msg":  "已开始下载更新文件",
+		"data": getUpdateStatus(),
 	})
 }
 
@@ -607,6 +768,7 @@ func main() {
 
 	{ // 系统更新
 		auth.GET("/api/update/version", UpdateVersionHandler)
+		auth.GET("/api/update/status", UpdateStatusHandler)
 		auth.POST("/api/update/run", UpdateRunHandler)
 	}
 	{
