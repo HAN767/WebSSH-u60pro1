@@ -780,7 +780,6 @@ const Manage = defineAsyncComponent(() => import('./Manage.vue'))
 let router = useRouter();
 let globalStore = useGlobalStore();
 const SFTP_EDIT_MAX_BYTES = 2 * 1024 * 1024;
-const DEFAULT_INIT_CMD = "source /etc/profile";
 const archiveExtensions = [
   ".tar.gz",
   ".tgz",
@@ -897,7 +896,7 @@ let data = reactive({
   cursor_style: "block",
   shell: "bash",
   pty_type: "xterm-256color",
-  init_cmd: DEFAULT_INIT_CMD,
+  init_cmd: "",
   init_banner: "",
 
   upload_path: "",
@@ -1537,7 +1536,7 @@ function cleanFrom() {
   data.cursor_style = "block";
   data.shell = "bash";
   data.pty_type = "xterm-256color";
-  data.init_cmd = DEFAULT_INIT_CMD;
+  data.init_cmd = "";
   data.init_banner = "";
   data.host_config_collapse = ['1'];
 }
