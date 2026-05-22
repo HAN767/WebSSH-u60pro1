@@ -200,7 +200,7 @@ func SysInit(c *gin.Context) {
 		CursorStyle: "block",
 		Shell:       "sh",
 		PtyType:     "xterm-256color",
-		InitCmd:     "",
+		InitCmd:     "source /etc/profile",
 		InitBanner:  "# https://github.com/o8oo8o/WebSSH",
 	}
 
