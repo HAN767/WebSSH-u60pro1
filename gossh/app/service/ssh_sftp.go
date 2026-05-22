@@ -8,10 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
 )
+
+const sftpEditMaxBytes = 2 * 1024 * 1024
 
 func getSshConn(sessionId string) (*SshConn, error) {
 	cli, ok := OnlineClients.Load(sessionId)
@@ -25,6 +28,23 @@ func getSshConn(sessionId string) (*SshConn, error) {
 		return nil, errors.New("断言ssh连接错误")
 	}
 	return conn, nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func execSftpShellCommand(conn *SshConn, cmd string) (string, error) {
+	session, err := conn.sshClient.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = session.Close()
+	}()
+
+	out, err := session.CombinedOutput(cmd)
+	return string(out), err
 }
 
 // SftpList GET sftp 获取指定目录下文件信息
@@ -284,4 +304,300 @@ func SftpCreateDir(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "msg": "创建目录成功"})
+}
+
+// SftpRename sftp 重命名文件或目录
+func SftpRename(c *gin.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			c.JSON(200, gin.H{"code": 4, "msg": "重命名错误"})
+			return
+		}
+	}()
+
+	type Body struct {
+		SessionId string `form:"session_id" binding:"required,min=1,max=128" json:"session_id"`
+		OldPath   string `form:"old_path" binding:"required,min=1,max=1024" json:"old_path"`
+		NewPath   string `form:"new_path" binding:"required,min=1,max=1024" json:"new_path"`
+	}
+
+	var body Body
+	if err := c.ShouldBind(&body); err != nil {
+		slog.Error("绑定数据错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 1, "msg": "输入数据不合法"})
+		return
+	}
+	conn, err := getSshConn(body.SessionId)
+	if err != nil {
+		slog.Error(err.Error())
+		c.JSON(200, gin.H{"code": 1, "msg": err.Error()})
+		return
+	}
+
+	if err := conn.sftpClient.Rename(body.OldPath, body.NewPath); err != nil {
+		slog.Error("sftpClient.Rename错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 2, "msg": "重命名错误"})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "msg": "重命名成功"})
+}
+
+// SftpChmod sftp 修改文件或目录权限
+func SftpChmod(c *gin.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			c.JSON(200, gin.H{"code": 4, "msg": "设置权限错误"})
+			return
+		}
+	}()
+
+	type Body struct {
+		SessionId string `form:"session_id" binding:"required,min=1,max=128" json:"session_id"`
+		Path      string `form:"path" binding:"required,min=1,max=1024" json:"path"`
+		Mode      string `form:"mode" binding:"required,min=3,max=4" json:"mode"`
+	}
+
+	var body Body
+	if err := c.ShouldBind(&body); err != nil {
+		slog.Error("绑定数据错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 1, "msg": "输入数据不合法"})
+		return
+	}
+
+	modeText := strings.TrimSpace(body.Mode)
+	modeValue, err := strconv.ParseUint(modeText, 8, 32)
+	if err != nil || modeValue > 07777 {
+		c.JSON(200, gin.H{"code": 2, "msg": "权限格式错误, 请输入 644 或 0755"})
+		return
+	}
+
+	conn, err := getSshConn(body.SessionId)
+	if err != nil {
+		slog.Error(err.Error())
+		c.JSON(200, gin.H{"code": 3, "msg": err.Error()})
+		return
+	}
+
+	if err := conn.sftpClient.Chmod(body.Path, os.FileMode(modeValue)); err != nil {
+		slog.Error("sftpClient.Chmod错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 4, "msg": "设置权限错误"})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "msg": "设置权限成功"})
+}
+
+// SftpReadFile sftp 读取文本文件内容
+func SftpReadFile(c *gin.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			c.JSON(200, gin.H{"code": 4, "msg": "读取文件错误"})
+			return
+		}
+	}()
+
+	type Body struct {
+		SessionId string `form:"session_id" binding:"required,min=1,max=128" json:"session_id"`
+		Path      string `form:"path" binding:"required,min=1,max=1024" json:"path"`
+	}
+
+	var body Body
+	if err := c.ShouldBind(&body); err != nil {
+		slog.Error("绑定数据错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 1, "msg": "输入数据不合法"})
+		return
+	}
+	conn, err := getSshConn(body.SessionId)
+	if err != nil {
+		slog.Error(err.Error())
+		c.JSON(200, gin.H{"code": 2, "msg": err.Error()})
+		return
+	}
+
+	file, err := conn.sftpClient.Open(body.Path)
+	if err != nil {
+		slog.Error("sftpClient.Open错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 3, "msg": "打开文件错误"})
+		return
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	content, err := io.ReadAll(io.LimitReader(file, sftpEditMaxBytes+1))
+	if err != nil {
+		slog.Error("读取文件内容错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 4, "msg": "读取文件错误"})
+		return
+	}
+	if len(content) > sftpEditMaxBytes {
+		c.JSON(200, gin.H{"code": 5, "msg": "文件超过 2MB, 请下载后编辑"})
+		return
+	}
+
+	c.JSON(200, gin.H{"code": 0, "msg": "ok", "data": gin.H{"path": body.Path, "content": string(content)}})
+}
+
+// SftpSaveFile sftp 保存文本文件内容
+func SftpSaveFile(c *gin.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			c.JSON(200, gin.H{"code": 4, "msg": "保存文件错误"})
+			return
+		}
+	}()
+
+	type Body struct {
+		SessionId string `form:"session_id" binding:"required,min=1,max=128" json:"session_id"`
+		Path      string `form:"path" binding:"required,min=1,max=1024" json:"path"`
+		Content   string `form:"content" json:"content"`
+	}
+
+	var body Body
+	if err := c.ShouldBind(&body); err != nil {
+		slog.Error("绑定数据错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 1, "msg": "输入数据不合法"})
+		return
+	}
+	if len([]byte(body.Content)) > sftpEditMaxBytes {
+		c.JSON(200, gin.H{"code": 2, "msg": "文件超过 2MB, 请下载后编辑"})
+		return
+	}
+
+	conn, err := getSshConn(body.SessionId)
+	if err != nil {
+		slog.Error(err.Error())
+		c.JSON(200, gin.H{"code": 3, "msg": err.Error()})
+		return
+	}
+
+	file, err := conn.sftpClient.OpenFile(body.Path, os.O_WRONLY|os.O_TRUNC)
+	if err != nil {
+		slog.Error("sftpClient.OpenFile错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 4, "msg": "打开文件错误"})
+		return
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	if _, err := io.Copy(file, strings.NewReader(body.Content)); err != nil {
+		slog.Error("写入文件内容错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 5, "msg": "保存文件错误"})
+		return
+	}
+
+	c.JSON(200, gin.H{"code": 0, "msg": "保存成功"})
+}
+
+// SftpCompressDir sftp 压缩目录为 tar.gz
+func SftpCompressDir(c *gin.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			c.JSON(200, gin.H{"code": 4, "msg": "压缩目录错误"})
+			return
+		}
+	}()
+
+	type Body struct {
+		SessionId string `form:"session_id" binding:"required,min=1,max=128" json:"session_id"`
+		Path      string `form:"path" binding:"required,min=1,max=1024" json:"path"`
+	}
+
+	var body Body
+	if err := c.ShouldBind(&body); err != nil {
+		slog.Error("绑定数据错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 1, "msg": "输入数据不合法"})
+		return
+	}
+	conn, err := getSshConn(body.SessionId)
+	if err != nil {
+		slog.Error(err.Error())
+		c.JSON(200, gin.H{"code": 2, "msg": err.Error()})
+		return
+	}
+
+	dirPath := path.Clean(body.Path)
+	parentDir := path.Dir(dirPath)
+	baseName := path.Base(dirPath)
+	if baseName == "." || baseName == "/" || baseName == "" {
+		c.JSON(200, gin.H{"code": 3, "msg": "目录路径不合法"})
+		return
+	}
+
+	archiveName := baseName + ".tar.gz"
+	archivePath := path.Join(parentDir, archiveName)
+	cmd := fmt.Sprintf("cd %s && tar -czf %s %s", shellQuote(parentDir), shellQuote(archiveName), shellQuote(baseName))
+	out, err := execSftpShellCommand(conn, cmd)
+	if err != nil {
+		slog.Error("压缩目录命令错误", "err_msg", err.Error(), "output", out)
+		c.JSON(200, gin.H{"code": 4, "msg": "压缩目录错误", "data": out})
+		return
+	}
+
+	c.JSON(200, gin.H{"code": 0, "msg": "压缩成功", "data": gin.H{"path": archivePath, "output": out}})
+}
+
+func archiveExtractCommand(archivePath string, dstPath string) (string, bool) {
+	lowerName := strings.ToLower(path.Base(archivePath))
+	archive := shellQuote(archivePath)
+	dst := shellQuote(dstPath)
+
+	switch {
+	case strings.HasSuffix(lowerName, ".tar.gz") || strings.HasSuffix(lowerName, ".tgz"):
+		return fmt.Sprintf("mkdir -p %s && tar -xzf %s -C %s", dst, archive, dst), true
+	case strings.HasSuffix(lowerName, ".tar.bz2") || strings.HasSuffix(lowerName, ".tbz2"):
+		return fmt.Sprintf("mkdir -p %s && tar -xjf %s -C %s", dst, archive, dst), true
+	case strings.HasSuffix(lowerName, ".tar.xz") || strings.HasSuffix(lowerName, ".txz"):
+		return fmt.Sprintf("mkdir -p %s && tar -xJf %s -C %s", dst, archive, dst), true
+	case strings.HasSuffix(lowerName, ".tar"):
+		return fmt.Sprintf("mkdir -p %s && tar -xf %s -C %s", dst, archive, dst), true
+	case strings.HasSuffix(lowerName, ".zip"):
+		return fmt.Sprintf("mkdir -p %s && unzip -o %s -d %s", dst, archive, dst), true
+	default:
+		return "", false
+	}
+}
+
+// SftpExtractArchive sftp 解压压缩包
+func SftpExtractArchive(c *gin.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			c.JSON(200, gin.H{"code": 4, "msg": "解压错误"})
+			return
+		}
+	}()
+
+	type Body struct {
+		SessionId string `form:"session_id" binding:"required,min=1,max=128" json:"session_id"`
+		Path      string `form:"path" binding:"required,min=1,max=1024" json:"path"`
+		DstPath   string `form:"dst_path" binding:"required,min=1,max=1024" json:"dst_path"`
+	}
+
+	var body Body
+	if err := c.ShouldBind(&body); err != nil {
+		slog.Error("绑定数据错误", "err_msg", err.Error())
+		c.JSON(200, gin.H{"code": 1, "msg": "输入数据不合法"})
+		return
+	}
+	conn, err := getSshConn(body.SessionId)
+	if err != nil {
+		slog.Error(err.Error())
+		c.JSON(200, gin.H{"code": 2, "msg": err.Error()})
+		return
+	}
+
+	cmd, ok := archiveExtractCommand(path.Clean(body.Path), path.Clean(body.DstPath))
+	if !ok {
+		c.JSON(200, gin.H{"code": 3, "msg": "暂不支持该压缩包格式"})
+		return
+	}
+
+	out, err := execSftpShellCommand(conn, cmd)
+	if err != nil {
+		slog.Error("解压命令错误", "err_msg", err.Error(), "output", out)
+		c.JSON(200, gin.H{"code": 4, "msg": "解压错误", "data": out})
+		return
+	}
+
+	c.JSON(200, gin.H{"code": 0, "msg": "解压成功", "data": gin.H{"output": out}})
 }

@@ -533,12 +533,17 @@
                 <el-table-column prop="size" label="大小" width="100" sortable></el-table-column>
                 <el-table-column prop="mode" label="权限" width="100" sortable></el-table-column>
                 <el-table-column prop="mod_time" label="修改日期" width="180" sortable></el-table-column>
-                <el-table-column label="操作" width="180" fixed="right">
+                <el-table-column label="操作" width="360" fixed="right">
                   <template #default="scope">
-                    <el-button-group>
+                    <el-button-group style="display: flex; flex-wrap: nowrap;">
                       <el-button v-if="scope.row.type == 'f'" @click="downloadFile(scope.row)" type="success"
                         :icon="Bottom">下载</el-button>
                       <el-button v-else type="primary" :icon="Upload" @click="uploadFile(scope.row.path)">上传</el-button>
+                      <el-button v-if="scope.row.type == 'f' && scope.row.size <= SFTP_EDIT_MAX_BYTES" type="primary" @click="openEditor(scope.row)">编辑</el-button>
+                      <el-button v-if="scope.row.type == 'd'" type="success" @click="compressDir(scope.row)">压缩</el-button>
+                      <el-button v-if="isArchiveFile(scope.row)" type="warning" @click="openExtractDialog(scope.row)">解压</el-button>
+                      <el-button type="warning" @click="changePermission(scope.row)">权限</el-button>
+                      <el-button type="primary" @click="renameFile(scope.row)">重命名</el-button>
                       <el-popconfirm confirmButtonText="删除" cancelButtonText="取消" icon="el-icon-info" iconColor="red"
                         title="确定删除吗" @confirm="deleteFile(scope.row)">
                         <template #reference>
@@ -549,6 +554,82 @@
                   </template>
                 </el-table-column>
               </el-table>
+            </el-dialog>
+
+            <el-dialog
+              v-model="data.extract_dialog_visible"
+              :title="'解压: ' + data.extract_file_name"
+              width="92%"
+              style="max-width: 560px;"
+              custom-class="modern-dialog file-extract-dialog"
+              :close-on-click-modal="false"
+            >
+              <el-form-item label="解压路径">
+                <el-input v-model="data.extract_dst_path" placeholder="请输入解压路径" />
+              </el-form-item>
+              <template #footer>
+                <span class="dialog-footer">
+                  <el-button @click="data.extract_dialog_visible = false">取消</el-button>
+                  <el-button type="primary" :loading="data.extracting" @click="extractArchive">解压</el-button>
+                </span>
+              </template>
+            </el-dialog>
+
+            <el-dialog
+              v-model="data.permission_dialog_visible"
+              :title="'设置权限: ' + data.permission_path"
+              width="92%"
+              style="max-width: 520px;"
+              custom-class="modern-dialog file-permission-dialog"
+            >
+              <div class="permission-grid">
+                <div></div>
+                <div>读取</div>
+                <div>写入</div>
+                <div>执行</div>
+                <div>所有者</div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.owner.read" /></div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.owner.write" /></div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.owner.execute" /></div>
+                <div>用户组</div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.group.read" /></div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.group.write" /></div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.group.execute" /></div>
+                <div>所有人</div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.other.read" /></div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.other.write" /></div>
+                <div class="permission-check"><el-checkbox v-model="data.permission_bits.other.execute" /></div>
+              </div>
+              <template #footer>
+                <span class="dialog-footer">
+                  <el-button @click="data.permission_dialog_visible = false">取消</el-button>
+                  <el-button type="primary" :loading="data.permission_saving" @click="savePermission">保存</el-button>
+                </span>
+              </template>
+            </el-dialog>
+
+            <el-dialog
+              v-model="data.editor_dialog_visible"
+              :title="'编辑文件: ' + data.editor_path"
+              width="80%"
+              custom-class="modern-dialog file-editor-dialog"
+              top="50px"
+              :close-on-click-modal="false"
+            >
+              <el-input
+                v-model="data.editor_content"
+                type="textarea"
+                :autosize="{ minRows: 18, maxRows: 28 }"
+                resize="vertical"
+                spellcheck="false"
+                style="font-family: Consolas, Monaco, monospace;"
+              />
+              <template #footer>
+                <span class="dialog-footer">
+                  <el-button @click="data.editor_dialog_visible = false">取消</el-button>
+                  <el-button type="primary" :loading="data.editor_saving" @click="saveEditor">保存</el-button>
+                </span>
+              </template>
             </el-dialog>
 
             <!-- 管理 -->
@@ -664,6 +745,17 @@ const Manage = defineAsyncComponent(() => import('./Manage.vue'))
 
 let router = useRouter();
 let globalStore = useGlobalStore();
+const SFTP_EDIT_MAX_BYTES = 2 * 1024 * 1024;
+const archiveExtensions = [
+  ".tar.gz",
+  ".tgz",
+  ".tar.bz2",
+  ".tbz2",
+  ".tar.xz",
+  ".txz",
+  ".tar",
+  ".zip",
+];
 
 enum Mode {
   "create" = 0,
@@ -785,9 +877,26 @@ let data = reactive({
   modify_devices_dialog_visible: false,
   modify_pwd_dialog_visible: false,
   manage_dialog_visible: false,
+  extract_dialog_visible: false,
+  permission_dialog_visible: false,
+  editor_dialog_visible: false,
   dir_info: {} as DirInfo,
   sftp_current_dir: "",
   sftp_upload_percentage: 0,
+  extract_path: "",
+  extract_file_name: "",
+  extract_dst_path: "",
+  extracting: false,
+  permission_path: "",
+  permission_saving: false,
+  permission_bits: {
+    owner: { read: false, write: false, execute: false },
+    group: { read: false, write: false, execute: false },
+    other: { read: false, write: false, execute: false },
+  },
+  editor_path: "",
+  editor_content: "",
+  editor_saving: false,
   new_pwd_one: "",
   new_pwd_two: "",
 });
@@ -1542,6 +1651,231 @@ function deleteFile(file: FileInfo) {
     } else {
       ElMessage.error("删除文件出错了");
     }
+  });
+}
+
+function getFileDir(filePath: string) {
+  let index = filePath.lastIndexOf("/");
+  if (index <= 0) {
+    return "/";
+  }
+  return filePath.substring(0, index);
+}
+
+function joinSftpPath(dir: string, name: string) {
+  if (dir === "/") {
+    return `/${name}`;
+  }
+  return `${dir}/${name}`;
+}
+
+function isArchiveFile(file: FileInfo) {
+  if (file.type !== "f") {
+    return false;
+  }
+  let lowerName = file.name.toLowerCase();
+  return archiveExtensions.some((ext) => lowerName.endsWith(ext));
+}
+
+function compressDir(file: FileInfo) {
+  let body = {
+    "session_id": data.current_host.session_id,
+    "path": file.path,
+  };
+  axios.post<ResponseData>("/api/sftp/compress", body).then((ret) => {
+    if (ret.data.code === 0) {
+      listDir(data.sftp_current_dir, data.current_host);
+      ElMessage.success("压缩成功");
+    } else {
+      ElMessage.error(ret.data.msg || "压缩失败");
+    }
+  }).catch(() => {
+    ElMessage.error("压缩异常");
+  });
+}
+
+function openExtractDialog(file: FileInfo) {
+  data.extract_path = file.path;
+  data.extract_file_name = file.name;
+  data.extract_dst_path = getFileDir(file.path);
+  data.extract_dialog_visible = true;
+}
+
+function extractArchive() {
+  let dstPath = data.extract_dst_path.trim();
+  if (!dstPath) {
+    ElMessage.error("请输入解压路径");
+    return;
+  }
+
+  data.extracting = true;
+  let body = {
+    "session_id": data.current_host.session_id,
+    "path": data.extract_path,
+    "dst_path": dstPath,
+  };
+  axios.post<ResponseData>("/api/sftp/extract", body).then((ret) => {
+    if (ret.data.code === 0) {
+      data.extract_dialog_visible = false;
+      listDir(data.sftp_current_dir, data.current_host);
+      ElMessage.success("解压成功");
+    } else {
+      ElMessage.error(ret.data.msg || "解压失败");
+    }
+  }).catch(() => {
+    ElMessage.error("解压异常");
+  }).finally(() => {
+    data.extracting = false;
+  });
+}
+
+function modeToOctal(mode: string) {
+  let text = mode.trim();
+  if (/^[0-7]{3,4}$/.test(text)) {
+    return text;
+  }
+  if (text.length < 10) {
+    return "";
+  }
+  let value = 0;
+  let chars = text.slice(-9);
+  let weights = [256, 128, 64, 32, 16, 8, 4, 2, 1];
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] !== "-") {
+      value += weights[i];
+    }
+  }
+  return value.toString(8).padStart(3, "0");
+}
+
+type PermissionSubject = "owner" | "group" | "other";
+
+function setPermissionBitsFromMode(mode: string) {
+  let octal = modeToOctal(mode).slice(-3).padStart(3, "0");
+  let subjects: Array<PermissionSubject> = ["owner", "group", "other"];
+  subjects.forEach((subject, index) => {
+    let value = Number(octal[index] || "0");
+    data.permission_bits[subject].read = (value & 4) > 0;
+    data.permission_bits[subject].write = (value & 2) > 0;
+    data.permission_bits[subject].execute = (value & 1) > 0;
+  });
+}
+
+function getPermissionMode() {
+  let subjects: Array<PermissionSubject> = ["owner", "group", "other"];
+  return subjects.map((subject) => {
+    let value = 0;
+    if (data.permission_bits[subject].read) {
+      value += 4;
+    }
+    if (data.permission_bits[subject].write) {
+      value += 2;
+    }
+    if (data.permission_bits[subject].execute) {
+      value += 1;
+    }
+    return value.toString();
+  }).join("");
+}
+
+async function renameFile(file: FileInfo) {
+  try {
+    const ret = await ElMessageBox.prompt("请输入新名称", "重命名", {
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+      inputValue: file.name,
+      inputPattern: /^(?!\s*$)[^/]+$/,
+      inputErrorMessage: "名称不能为空, 且不能包含 /",
+    });
+    let newName = String(ret.value || "").trim();
+    if (!newName || newName === file.name) {
+      return;
+    }
+    let body = {
+      "session_id": data.current_host.session_id,
+      "old_path": file.path,
+      "new_path": joinSftpPath(getFileDir(file.path), newName),
+    };
+    let response = await axios.patch<ResponseData>("/api/sftp/rename", body);
+    if (response.data.code === 0) {
+      listDir(data.sftp_current_dir, data.current_host);
+      ElMessage.success("重命名成功");
+    } else {
+      ElMessage.error(response.data.msg || "重命名失败");
+    }
+  } catch {
+  }
+}
+
+function changePermission(file: FileInfo) {
+  data.permission_path = file.path;
+  setPermissionBitsFromMode(file.mode);
+  data.permission_dialog_visible = true;
+}
+
+function savePermission() {
+  data.permission_saving = true;
+  let body = {
+    "session_id": data.current_host.session_id,
+    "path": data.permission_path,
+    "mode": getPermissionMode(),
+  };
+  axios.patch<ResponseData>("/api/sftp/chmod", body).then((ret) => {
+    if (ret.data.code === 0) {
+      data.permission_dialog_visible = false;
+      listDir(data.sftp_current_dir, data.current_host);
+      ElMessage.success("权限设置成功");
+    } else {
+      ElMessage.error(ret.data.msg || "权限设置失败");
+    }
+  }).catch(() => {
+    ElMessage.error("权限设置异常");
+  }).finally(() => {
+    data.permission_saving = false;
+  });
+}
+
+function openEditor(file: FileInfo) {
+  if (file.size > SFTP_EDIT_MAX_BYTES) {
+    ElMessage.warning("文件超过 2MB, 请下载后编辑");
+    return;
+  }
+  let body = {
+    "session_id": data.current_host.session_id,
+    "path": file.path,
+  };
+  axios.post<ResponseData>("/api/sftp/read", body).then((ret) => {
+    if (ret.data.code === 0) {
+      data.editor_path = file.path;
+      data.editor_content = ret.data.data.content || "";
+      data.editor_dialog_visible = true;
+    } else {
+      ElMessage.error(ret.data.msg || "读取文件失败");
+    }
+  }).catch(() => {
+    ElMessage.error("读取文件异常");
+  });
+}
+
+function saveEditor() {
+  data.editor_saving = true;
+  let body = {
+    "session_id": data.current_host.session_id,
+    "path": data.editor_path,
+    "content": data.editor_content,
+  };
+  axios.put<ResponseData>("/api/sftp/save", body).then((ret) => {
+    if (ret.data.code === 0) {
+      data.editor_dialog_visible = false;
+      listDir(data.sftp_current_dir, data.current_host);
+      ElMessage.success("保存成功");
+    } else {
+      ElMessage.error(ret.data.msg || "保存失败");
+    }
+  }).catch(() => {
+    ElMessage.error("保存异常");
+  }).finally(() => {
+    data.editor_saving = false;
   });
 }
 
@@ -2572,6 +2906,47 @@ const terminalBackground = computed(() => {
   color: #475569;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: 110px repeat(3, minmax(64px, 1fr));
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+}
+
+.permission-grid > div {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid #ebeef5;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.permission-grid > div:nth-child(4n) {
+  border-right: 0;
+}
+
+.permission-grid > div:nth-last-child(-n + 4) {
+  border-bottom: 0;
+}
+
+.permission-grid > div:nth-child(-n + 4) {
+  background: #f5f7fa;
+  color: #606266;
+  font-weight: 600;
+}
+
+.permission-check :deep(.el-checkbox) {
+  height: auto;
+  margin: 0;
+}
+
+.permission-check :deep(.el-checkbox__label) {
+  display: none;
 }
 
 @media (max-width: 768px) {
