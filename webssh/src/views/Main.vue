@@ -75,13 +75,13 @@
 
         </div>
 
-        <div class="auto-refresh-controls" style="display: flex;align-items: center;gap: 5px;flex-wrap: wrap;">
+        <!-- <div class="auto-refresh-controls" style="display: flex;align-items: center;gap: 5px;flex-wrap: wrap;">
           WiFi:<span :class="wifiInfo.highPerformance ? 'hp' : 'psm'">{{ wifiModeText }}</span>
           <button style="margin-left: 1px;" class="btn" :class="wifiInfo.highPerformance ? 'btn-primary' : 'btn-primary'"
                   @click="psmSetHandler(!wifiInfo.highPerformance)" >
             {{ wifiButtonText }}
           </button>
-        </div>
+        </div> -->
         <div v-if="wifiStatus?.main2g_ssid !== wifiStatus?.main5g_ssid" class="auto-refresh-controls" style="display: flex;align-items: center;gap: 10px;flex-wrap: wrap;">
           2.4G-WIFI: {{wifiInfo.wifiStatus24?'开':'关'}}
           <button style="margin-left: 1px;" class="btn" :class="wifiInfo.wifiStatus24 ? 'btn-primary' : 'btn-primary'"
