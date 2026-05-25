@@ -34,10 +34,10 @@
                       </template>
 
                       <p class="init-tip">
-                        U60Pro 版本只使用本地 SQLite，默认数据库文件为gowebssh.db，会保存在程序启动目录下。（通常需要先 cd 到目录，再运行程序）
+                        U60Pro 版本只使用本地 SQLite，默认数据库文件为webssh.db，会保存在程序启动目录下。（通常需要先 cd 到目录，再运行程序）
                       </p>
-                      <el-input v-model="form.sqlite_dbdsn" minlength="2" maxlength="255" show-word-limit clearable
-                        placeholder="数据库文件名，例如 gowebssh.db">
+                      <el-input v-model="form.sqlite_db_file" minlength="2" maxlength="255" show-word-limit clearable
+                        placeholder="数据库文件名，例如 webssh.db">
                       </el-input>
                     </el-card>
                   </el-form-item>
@@ -91,7 +91,7 @@
                         </div>
                       </template>
                       <p>数据库类型:&nbsp;&nbsp;{{ db_kind }}</p>
-                      <p>数据库DSN:&nbsp;&nbsp;{{ db_dsn }}</p>
+                      <p>数据库文件:&nbsp;&nbsp;{{ db_file }}</p>
                       <p>Web登录账号:&nbsp;&nbsp;{{ form.name }}</p>
                       <p>Web登录密码:&nbsp;&nbsp;{{ form.pwd }}</p>
                       </br>
@@ -151,7 +151,7 @@ let router = useRouter();
 
 
 const form = reactive({
-  sqlite_dbdsn: "gowebssh.db",
+  sqlite_db_file: "webssh.db",
   db_type: "sqlite",
   name: "",
   pwd: "",
@@ -161,8 +161,8 @@ const form = reactive({
   sshd_pwd: ""
 })
 
-let db_dsn = computed<string>(() => {
-  return form.sqlite_dbdsn
+let db_file = computed<string>(() => {
+  return form.sqlite_db_file
 })
 
 let db_kind = computed<string>(() => {
@@ -191,13 +191,13 @@ interface ResponseData {
 }
 
 function dbConnCheck() {
-  let str = db_dsn.value.trim();
+  let str = db_file.value.trim();
   if (str.length < 2) {
     ElMessage.error("请输入正确配置")
     return;
   }
   axios.post<ResponseData>(`/api/sys/db_conn_check`,
-    { "db_type": form.db_type, "db_dsn": str }
+    { "db_type": form.db_type, "db_file": str }
   ).then((ret) => {
     if (ret.data.code === 0) {
       ElMessage.success("连接数据库成功");
@@ -225,7 +225,7 @@ function sysInit() {
   form.db_type = "sqlite";
   let initData = {
     "db_type": form.db_type,
-    "db_dsn": db_dsn.value.trim(),
+    "db_file": db_file.value.trim(),
     "jwt_secret": randomString(64),
     "session_secret": randomString(64),
     "username": form.name.trim(),
@@ -235,7 +235,7 @@ function sysInit() {
     "sshd_user": form.sshd_user.trim(),
     "sshd_pwd": form.sshd_pwd.trim()
   }
-  if (initData.db_dsn.length < 2) {
+  if (initData.db_file.length < 2) {
     ElMessage.error("系统初始化错误:请输入 SQLite 数据库文件名")
     return
   }

@@ -17,7 +17,7 @@ func DbCheck() gin.HandlerFunc {
 			if tx.Error == nil {
 				c.Next()
 			} else {
-				err := model.DbMigrate(config.DefaultConfig.DbType, config.DefaultConfig.DbDsn)
+				err := model.DbMigrate(config.DefaultConfig.DbType, config.DefaultConfig.DbFile)
 				if err != nil {
 					c.Abort()
 					c.JSON(500, gin.H{"code": 500, "msg": "数据库连接错误:" + err.Error()})

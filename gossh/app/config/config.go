@@ -14,7 +14,7 @@ type AppConfig struct {
 	WebBaseDir    string        `json:"web_base_dir"  toml:"web_base_dir"`
 	AppName       string        `json:"app_name"  toml:"app_name"`
 	DbType        string        `json:"db_type" toml:"db_type"`
-	DbDsn         string        `json:"db_dsn" toml:"db_dsn"`
+	DbFile        string        `json:"db_file" toml:"db_file"`
 	IsInit        bool          `json:"is_init" toml:"is_init"`
 	JwtSecret     string        `json:"jwt_secret" toml:"jwt_secret"`
 	AesSecret     string        `json:"aes_secret" toml:"aes_secret"`
@@ -47,7 +47,7 @@ var DefaultConfig = AppConfig{
 	WebBaseDir:    "",
 	AppName:       "GoWebSHH",
 	DbType:        "sqlite",
-	DbDsn:         "gowebssh.db",
+	DbFile:        "gowebssh.db",
 	IsInit:        false,
 	JwtSecret:     utils.RandString(64),
 	AesSecret:     utils.RandString(32),
@@ -129,6 +129,9 @@ func InitConfig() {
 	if err != nil {
 		slog.Error("TOML解析配置文件错误:", "err_msg", err.Error())
 		return
+	}
+	if DefaultConfig.DbFile == "" {
+		DefaultConfig.DbFile = "gowebssh.db"
 	}
 
 	// 修正webBaseDir

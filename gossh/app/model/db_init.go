@@ -21,7 +21,7 @@ func InitDatabase() {
 		slog.Warn("系统未初始化,跳过DbMigrate")
 		return
 	}
-	err := DbMigrate(config.DefaultConfig.DbType, config.DefaultConfig.DbDsn)
+	err := DbMigrate(config.DefaultConfig.DbType, config.DefaultConfig.DbFile)
 	if err != nil {
 		slog.Error("DbMigrate error", "err_msg", err.Error())
 	}

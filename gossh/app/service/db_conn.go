@@ -9,7 +9,7 @@ import (
 )
 
 type DbConnConf struct {
-	DbDsn  string `form:"db_dsn" binding:"required,min=1,max=65535" json:"db_dsn"`
+	DbFile string `form:"db_file" binding:"required,min=1,max=255" json:"db_file"`
 	DbType string `form:"db_type" binding:"required,oneof=sqlite" json:"db_type"`
 }
 
@@ -33,12 +33,12 @@ func DbConnCheck(c *gin.Context) {
 }
 
 func DbConnTestCheck(dbConf DbConnConf) error {
-	slog.Info("DB link check", "db_type", dbConf.DbType, "db_dsn", dbConf.DbDsn)
+	slog.Info("DB link check", "db_type", dbConf.DbType, "db_file", dbConf.DbFile)
 	if dbConf.DbType != "sqlite" {
 		return model.ErrUnsupportedDB
 	}
 
-	Db, err := model.GetSqliteDb(dbConf.DbDsn)
+	Db, err := model.GetSqliteDb(dbConf.DbFile)
 	if err != nil {
 		return err
 	}

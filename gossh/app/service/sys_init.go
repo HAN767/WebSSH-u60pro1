@@ -67,7 +67,7 @@ func SysInit(c *gin.Context) {
 
 	// 2.数据库连接检查
 	dbConf := DbConnConf{
-		DbDsn:  initConf.DbDsn,
+		DbFile: initConf.DbFile,
 		DbType: initConf.DbType,
 	}
 	err := DbConnTestCheck(dbConf)
@@ -77,7 +77,7 @@ func SysInit(c *gin.Context) {
 	}
 
 	// 3.数据库表迁移
-	err = model.DbMigrate(initConf.DbType, initConf.DbDsn)
+	err = model.DbMigrate(initConf.DbType, initConf.DbFile)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 1, "msg": err.Error(), "data": "执行数据库迁移错误"})
 		return
@@ -172,7 +172,7 @@ func SysInit(c *gin.Context) {
 	var defConf = config.DefaultConfig
 	defConf.IsInit = true
 	defConf.DbType = initConf.DbType
-	defConf.DbDsn = initConf.DbDsn
+	defConf.DbFile = initConf.DbFile
 	defConf.JwtSecret = initConf.JwtSecret
 	defConf.SessionSecret = initConf.SessionSecret
 	err = config.RewriteConfig(defConf)
