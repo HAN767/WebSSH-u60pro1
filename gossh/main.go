@@ -32,7 +32,7 @@ var version = "dev"
 const (
 	GithubRepo            = "Jack-bin183/WebSSH-u60pro"
 	updateConnectTimeout  = 3 * time.Second
-	updateVersionFileURL  = "https://raw.githubusercontent.com/" + GithubRepo + "/master/version.txt"
+	updateVersionFileURL  = "https://raw.githubusercontent.com/" + GithubRepo + "/version/version.txt"
 	updateReleaseURL      = "https://github.com/" + GithubRepo + "/releases/latest"
 	updateDownloadBaseURL = "https://github.com/" + GithubRepo + "/releases/latest/download/webssh_"
 )

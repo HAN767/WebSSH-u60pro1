@@ -76,22 +76,30 @@ jobs:
         run: |
           cd gossh
           upx --best --lzma webssh_${VERSION} || true
-
-      # 9. 生成 version.txt 到仓库根目录
+      
+      # 9. 生成 version.txt
       - name: Generate version file
         run: |
           echo "${VERSION}" > version.txt
 
-      # 10. 提交 version.txt 到当前分支根目录
-      - name: Commit version.txt
+      # 10. 推送 version.txt 到独立 version 分支
+      - name: Push version.txt to version branch
         run: |
+          mkdir -p /tmp/version-branch
+          cp version.txt /tmp/version-branch/version.txt
+
+          cd /tmp/version-branch
+
+          git init
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          git checkout -b version
           git add version.txt
-          git commit -m "chore: update version.txt to ${VERSION} [skip ci]" || echo "version.txt 没有变化，跳过提交"
+          git commit -m "update version.txt to ${VERSION}"
 
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git remote add origin https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/${{ github.repository }}.git
+          git push -f origin version
 
       # 11. 创建 Release（直接上传原始文件）
       - name: Create Release
