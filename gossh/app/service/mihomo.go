@@ -334,7 +334,7 @@ func getMihomoInstalledVersion(dir string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binPath, "version")
+	cmd := exec.CommandContext(ctx, binPath, "-v")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return ""
@@ -363,9 +363,9 @@ func parseMihomoConfig(configPath string) (extCtrl string, secret string) {
 			secret = strings.Trim(val, `"'`)
 		}
 	}
-	// ":9999" → "127.0.0.1:9999"
+	// ":9999" → "192.168.0.1:9999/ui"
 	if strings.HasPrefix(extCtrl, ":") {
-		extCtrl = "127.0.0.1" + extCtrl
+		extCtrl = "192.168.0.1" + extCtrl + "/ui"
 	}
 	return extCtrl, secret
 }
@@ -477,6 +477,7 @@ func MihomoStatusHandler(c *gin.Context) {
 			"api_version":         apiVersion,
 			"external_controller": extCtrl,
 			"files":               files,
+			"autostart_enabled":   getMihomoAutostartEnabled(dir),
 		},
 	})
 }
@@ -644,18 +645,18 @@ func runMihomoDataUpdate(ctx context.Context, cancel context.CancelFunc) {
 
 // MihomoCheckBinaryVersionHandler GET /api/mihomo/binary/version
 func MihomoCheckBinaryVersionHandler(c *gin.Context) {
-	latestVersion, err := mihomoFetchText(mihomoInstallVersionURL)
+	remote_version, err := mihomoFetchText(mihomoInstallVersionURL)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 1, "msg": "获取最新版本失败: " + err.Error()})
 		return
 	}
-	installedVersion := getMihomoInstalledVersion(getMihomoDir())
+	local_version := getMihomoInstalledVersion(getMihomoDir())
 	c.JSON(200, gin.H{
 		"code": 0, "msg": "ok",
 		"data": gin.H{
-			"installed_version": installedVersion,
-			"latest_version":    latestVersion,
-			"has_update":        latestVersion != "" && latestVersion != installedVersion,
+			"local_version":  local_version,
+			"remote_version": remote_version,
+			"has_update":     remote_version != "" && remote_version != local_version,
 		},
 	})
 }
@@ -855,4 +856,71 @@ func MihomoSaveConfigHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "msg": "配置已保存"})
+}
+
+// ─────────────────────────── 开机自启 ───────────────────────────
+
+const mihomoAutostartMarker = ".autostart"
+
+func getMihomoAutostartEnabled(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, mihomoAutostartMarker))
+	return err == nil
+}
+
+// InitMihomoAutostart 在 webssh 启动时检查自启标记，若存在则后台启动 mihomo。
+func InitMihomoAutostart() {
+	dir := getMihomoDir()
+	if !getMihomoAutostartEnabled(dir) {
+		return
+	}
+	go func() {
+		mmSh := filepath.Join(dir, "mm.sh")
+		if _, err := os.Stat(mmSh); err != nil {
+			slog.Warn("mihomo autostart: mm.sh not found", "path", mmSh)
+			return
+		}
+		slog.Info("mihomo autostart: starting mihomo via mm.sh")
+		cmd := exec.Command(mmSh, "start")
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			slog.Warn("mihomo autostart: start failed", "err", err, "out", string(out))
+		} else {
+			slog.Info("mihomo autostart: started", "out", strings.TrimSpace(string(out)))
+		}
+	}()
+}
+
+// MihomoGetAutostartHandler GET /api/mihomo/autostart
+func MihomoGetAutostartHandler(c *gin.Context) {
+	dir := getMihomoDir()
+	c.JSON(200, gin.H{"code": 0, "msg": "ok", "data": gin.H{"enabled": getMihomoAutostartEnabled(dir)}})
+}
+
+// MihomoSetAutostartHandler POST /api/mihomo/autostart  {"enabled": true/false}
+func MihomoSetAutostartHandler(c *gin.Context) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, gin.H{"code": 1, "msg": "参数错误: " + err.Error()})
+		return
+	}
+	dir := getMihomoDir()
+	marker := filepath.Join(dir, mihomoAutostartMarker)
+	if req.Enabled {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			c.JSON(200, gin.H{"code": 1, "msg": "创建目录失败: " + err.Error()})
+			return
+		}
+		if err := os.WriteFile(marker, []byte(""), 0644); err != nil {
+			c.JSON(200, gin.H{"code": 1, "msg": "写入标记失败: " + err.Error()})
+			return
+		}
+	} else {
+		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+			c.JSON(200, gin.H{"code": 1, "msg": "删除标记失败: " + err.Error()})
+			return
+		}
+	}
+	c.JSON(200, gin.H{"code": 0, "msg": "ok", "data": gin.H{"enabled": req.Enabled}})
 }

@@ -74,7 +74,7 @@ jobs:
                  data_version.txt mihomo-linux-arm64 mihomo_version.txt \
                  mm.sh 2>/dev/null || true
 
-      - name: 发布到 Release (tag latest-data)
+      - name: 发布 latest-data Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-data

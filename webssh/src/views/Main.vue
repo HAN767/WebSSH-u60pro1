@@ -109,7 +109,7 @@
             </span>
           </button>
         </div>
-        
+
         <div v-if="wifiStatus?.main2g_ssid !== wifiStatus?.main5g_ssid" class="auto-refresh-controls" style="display: flex;align-items: center;gap: 10px;flex-wrap: wrap;">
           2.4G-WIFI: {{wifiInfo.wifiStatus24?'开':'关'}}
           <button style="margin-left: 1px;" class="btn" :class="wifiInfo.wifiStatus24 ? 'btn-primary' : 'btn-primary'"
@@ -861,33 +861,27 @@
         </div>
         <div class="card-content">
           <div class="info-grid">
-            <div class="auto-refresh-controls info-item" style="align-items: normal;">
-              QCI: {{ netAmbr.qci2 || netAmbr.qci1 }}
-            </div>
-            <div class="auto-refresh-controls info-item" style="align-items: normal;">
-              ⬇️ {{ netAmbr.dl.value }} {{ formatSpeedUnit(netAmbr.dl.unit) }}
-              ⬆️ {{ netAmbr.ul.value }} {{ formatSpeedUnit(netAmbr.dl.unit) }}
+            <div class="info-item">
+                <span class="label">运营商</span>
+                <span class="value">{{ netWorkProvider }}</span>
             </div>
             <div class="info-item">
-              <span class="label">运营商</span>
-              <span class="value">{{ netWorkProvider }}</span>
+                <span class="label">QCI</span>
+                <span class="value">{{ netAmbr.qci2 || netAmbr.qci1 }}</span>
             </div>
+            
+
             <div class="info-item">
               <span class="label">网络类型</span>
               <span class="value">{{ networkType }}{{ is5GA ? 'A' : '' }}</span>
             </div>
-            <!-- <div class="info-item">
-              <span class="label">驻网状态</span>
-              <span class="value">{{ d.simcard_roam || '-' }}</span>
-            </div> -->
-            <!-- <div class="info-item">
-              <span class="label">选择模式</span>
-              <span class="value">{{ d.net_select_mode || '-' }}</span>
-            </div> -->
-            <!-- <div class="info-item">
-              <span class="label">选择策略</span>
-              <span class="value">{{ d.net_select || '-' }}</span>
-            </div> -->
+
+            <div class="info-item">
+              <span class="label">签约速率</span>
+              <span class="value">⬇️ {{ netAmbr.dl.value }} {{ formatSpeedUnit(netAmbr.dl.unit) }} 
+               ⬆️ {{ netAmbr.ul.value }} {{ formatSpeedUnit(netAmbr.dl.unit) }}</span>
+            </div>
+
             <div class="info-item">
               <span class="label">信号强度</span>
               <div class="signal-bars">
@@ -900,9 +894,9 @@
             <div class="info-item">
               <span class="label">连接数量</span>
               <span class="value"
-                >有线：{{ lanUserList?.lan_num || '0' }} / 无线：{{
+                >无线: {{
                   lanUserList?.wireless_num || '0'
-                }}</span
+                }} / 有线: {{ lanUserList?.lan_num || '0' }}</span
               >
             </div>
             <div class="info-item">
@@ -1278,17 +1272,17 @@
             </el-tag>
             <span v-if="mihomoStatus.running" class="mh-meta">PID {{ mihomoStatus.pid }}</span>
             <span v-if="mihomoStatus.running && mihomoStatus.start_time" class="mh-meta">启动于 {{ mihomoStatus.start_time }}</span>
-            <span class="mh-meta mh-dir">{{ mihomoStatus.mihomo_dir }}</span>
+            <span class="mh-meta mh-dir">路径: {{ mihomoStatus.mihomo_dir }}</span>
           </div>
           <div class="mh-info-grid">
             <div class="mh-info-item">
-              <span class="mh-info-label">二进制版本</span>
-              <span class="mh-info-value">{{ mihomoStatus.binary_version || '未安装' }}</span>
+              <span class="mh-info-label">内核版本</span>
+              <span class="mh-info-value">{{ mihomoStatus.binary_version || '未知' }}</span>
             </div>
             <div class="mh-info-item">
               <span class="mh-info-label">API 状态</span>
               <el-tag v-if="mihomoStatus.running" :type="mihomoStatus.api_reachable ? 'success' : 'warning'" size="small">
-                {{ mihomoStatus.api_reachable ? '可访问' : '不可达' }}
+                {{ mihomoStatus.api_reachable ? '正常' : '异常' }}
               </el-tag>
               <span v-else class="mh-info-value">—</span>
             </div>
@@ -1297,8 +1291,18 @@
               <span class="mh-info-value">{{ mihomoStatus.api_version || '—' }}</span>
             </div>
             <div class="mh-info-item">
-              <span class="mh-info-label">外部控制器</span>
-              <span class="mh-info-value">{{ mihomoStatus.external_controller || '—' }}</span>
+              <span class="mh-info-label">控制面板</span>
+              <a
+                v-if="mihomoStatus.external_controller"
+                :href="'http://' + mihomoStatus.external_controller"
+                target="_blank"
+                style="text-decoration: none; color: blue;"
+                class="mh-info-value"
+              >
+                {{ mihomoStatus.external_controller }}
+              </a>
+              <span v-else class="mh-info-value">—</span>
+              
             </div>
           </div>
         </div>
@@ -1316,6 +1320,19 @@
         <transition name="el-fade-in">
           <pre v-if="mihomoControlOutput" class="mh-output">{{ mihomoControlOutput }}</pre>
         </transition>
+
+        <!-- 开机自启 -->
+        <div class="mh-autostart-row">
+          <span class="mh-info-label">开机自启</span>
+          <el-switch
+            v-model="mihomoStatus.autostart_enabled"
+            :loading="mihomoAutostartChanging"
+            active-text="已开启"
+            inactive-text="已关闭"
+            @change="(v: boolean) => setMihomoAutostart(v)"
+          />
+          <span class="mh-meta">webssh 启动时自动运行 mihomo</span>
+        </div>
       </el-tab-pane>
 
       <!-- ── Tab 2: 数据更新 ── -->
@@ -1395,7 +1412,7 @@
           <div class="mh-info-grid">
             <div class="mh-info-item">
               <span class="mh-info-label">已安装版本</span>
-              <span class="mh-info-value">{{ mihomoStatus.binary_version || '未安装' }}</span>
+              <span class="mh-info-value">{{ mihomoStatus.binary_version || '未知' }}</span>
             </div>
             <div class="mh-info-item">
               <span class="mh-info-label">远端最新版本</span>
@@ -1438,10 +1455,10 @@
         <el-divider style="margin:16px 0 10px">卸载</el-divider>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <el-button size="small" type="warning" @click="uninstallMihomo('soft')" :loading="mihomoUninstalling==='soft'">
-            软卸载（仅删除二进制）
+            仅删除内核
           </el-button>
           <el-button size="small" type="danger" @click="uninstallMihomo('full')" :loading="mihomoUninstalling==='full'">
-            完全卸载（删除全部文件）
+            完全卸载
           </el-button>
         </div>
       </el-tab-pane>
@@ -2779,6 +2796,7 @@ interface MihomoFileInfo { name: string; desc: string; exists: boolean; size: nu
 interface MihomoStatusData {
   running: boolean; pid: number; mihomo_dir: string; local_version: string; files: MihomoFileInfo[]
   binary_version: string; start_time: string; api_reachable: boolean; api_version: string; external_controller: string
+  autostart_enabled: boolean
 }
 interface MihomoVersionData { remote_version: string; local_version: string; has_update: boolean }
 interface MihomoUpdateStatusData {
@@ -2801,12 +2819,14 @@ const mihomoConfigSaving = ref(false)
 const mihomoConfigText = ref('')
 const mihomoConfigError = ref('')
 const mihomoUninstalling = ref('')
+const mihomoAutostartChanging = ref(false)
 let mihomoUpdatePollTimer: ReturnType<typeof setInterval> | null = null
 let mihomoInstallPollTimer: ReturnType<typeof setInterval> | null = null
 
 const mihomoStatus = reactive<MihomoStatusData>({
   running: false, pid: 0, mihomo_dir: '/data/kano_plugins/mihomo', local_version: '',
-  files: [], binary_version: '', start_time: '', api_reachable: false, api_version: '', external_controller: ''
+  files: [], binary_version: '', start_time: '', api_reachable: false, api_version: '', external_controller: '',
+  autostart_enabled: false
 })
 const mihomoVersionInfo = reactive<MihomoVersionData>({
   remote_version: '', local_version: '', has_update: false
@@ -2847,24 +2867,29 @@ async function loadMihomoStatus() {
   }
 }
 
+async function setMihomoAutostart(enabled: boolean) {
+  mihomoAutostartChanging.value = true
+  try {
+    const res = await axios.post('/api/mihomo/autostart', { enabled })
+    if (res.data.code === 0) {
+      mihomoStatus.autostart_enabled = enabled
+      ElMessage.success(enabled ? '已开启开机自启' : '已关闭开机自启')
+    } else {
+      ElMessage.error(res.data.msg || '设置失败')
+      mihomoStatus.autostart_enabled = !enabled
+    }
+  } catch {
+    ElMessage.error('请求失败')
+    mihomoStatus.autostart_enabled = !enabled
+  } finally {
+    mihomoAutostartChanging.value = false
+  }
+}
+
 function openMihomoDialog() {
   mihomoDialogVisible.value = true
   mihomoActiveTab.value = 'overview'
   loadMihomoStatus()
-  // 若后台有数据更新任务在跑，恢复轮询
-  axios.get('/api/mihomo/data/update/status').then(res => {
-    if (res.data.code === 0) {
-      Object.assign(mihomoUpdateStatus, res.data.data)
-      if (mihomoUpdateStatus.state === 'downloading') startMihomoUpdatePoll()
-    }
-  }).catch(() => {})
-  // 若后台有安装任务在跑，恢复轮询
-  axios.get('/api/mihomo/install/status').then(res => {
-    if (res.data.code === 0) {
-      Object.assign(mihomoInstallStatus, res.data.data)
-      if (mihomoInstallStatus.state === 'downloading') startMihomoInstallPoll()
-    }
-  }).catch(() => {})
 }
 
 // 切换到配置文件 tab 时自动加载
@@ -3070,7 +3095,7 @@ function stopMihomoInstallPoll() {
 }
 
 async function uninstallMihomo(mode: string) {
-  const label = mode === 'full' ? '完全卸载（删除全部文件）' : '软卸载（仅删除二进制）'
+  const label = mode === 'full' ? '完全卸载' : '仅删除内核'
   try {
     await ElMessageBox.confirm(`确认执行：${label}？此操作不可逆。`, '卸载确认', {
       confirmButtonText: '确认卸载',
@@ -3155,7 +3180,7 @@ function psmSetHandler(val:boolean){
     mode: val ? 'off' : 'on',
   }).then((res) => {
     psmGetHandler()
-    ElMessage.success('WiFi已切换为:' + (val ? '高性能模式(据说会降低WiFi延迟)' : '省电模式'));
+    ElMessage.success('WiFi已切换为:' + (val ? '高性能模式' : '省电模式'));
   }).finally(() => {
     wifiPsmSaving.value = false;
   });
@@ -3398,6 +3423,7 @@ onUnmounted(() => {
 .mh-info-label { font-size: 11px; color: #c0c4cc; }
 .mh-info-value { font-size: 13px; color: #303133; font-weight: 500; word-break: break-all; }
 .mh-control-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.mh-autostart-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid #ebeef5; }
 .mh-output {
   background: #1a1a2e; color: #a8b4c8; padding: 8px 12px; border-radius: 6px;
   font-size: 11px; line-height: 1.6; max-height: 130px; overflow-y: auto;

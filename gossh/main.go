@@ -809,6 +809,7 @@ func initApplication() {
 	model.InitDatabase()
 	service.InitSessionClean()
 	service.InitSshServer()
+	service.InitMihomoAutostart()
 	fmt.Printf("WebBaseDir:[%s]\n", config.DefaultConfig.WebBaseDir)
 }
 
@@ -979,6 +980,9 @@ func main() {
 		// 配置文件管理
 		auth.GET("/api/mihomo/config", service.MihomoGetConfigHandler)
 		auth.PUT("/api/mihomo/config", service.MihomoSaveConfigHandler)
+		// 开机自启
+		auth.GET("/api/mihomo/autostart", service.MihomoGetAutostartHandler)
+		auth.POST("/api/mihomo/autostart", service.MihomoSetAutostartHandler)
 	}
 
 	address := fmt.Sprintf("%s:%s", config.DefaultConfig.Address, config.DefaultConfig.Port)
