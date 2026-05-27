@@ -80,7 +80,7 @@ jobs:
           tag_name: latest-data
           name: "Mihomo 数据文件（每日自动更新）"
           body: |
-            自动更新的 mihomo 透明代理数据文件及二进制，每日 UTC 02:00 更新，也可在 WebSSH 管理界面中手动触发更新。
+            自动更新的 mihomo 透明代理数据文件及内核文件，每日 UTC 02:00 更新。
 
             | 文件 | 说明 |
             |---|---|
@@ -90,7 +90,7 @@ jobs:
             | `geoip.metadb` | 地理 IP 规则数据库（mihomo GEOIP 规则）|
             | `data_version.txt` | 数据版本号，格式：`YYYYMMDD_HHMM` |
             | `mihomo-linux-arm64` | Mihomo ARM64 可执行文件 |
-            | `mihomo_version.txt` | Mihomo 二进制版本号 |
+            | `mihomo_version.txt` | Mihomo 内核版本号 |
             | `mm.sh` | Mihomo 启动/控制脚本 |
 
             数据来源：
