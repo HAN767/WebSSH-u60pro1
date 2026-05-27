@@ -1433,7 +1433,7 @@
               :loading="mihomoInstallStatus.state==='downloading'"
               :disabled="mihomoInstallStatus.state==='downloading'"
               @click="startMihomoInstall">
-              {{ mihomoStatus.binary_version ? '更新二进制' : '安装 Mihomo' }}
+              {{ mihomoStatus.binary_version ? '更新内核' : '安装 Mihomo' }}
             </el-button>
             <el-button v-if="mihomoInstallStatus.state==='downloading'" size="small" type="danger" @click="cancelMihomoInstall">取消</el-button>
           </div>

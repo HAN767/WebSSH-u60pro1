@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gossh/gin"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,8 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gossh/gin"
 )
 
 // ─────────────────────────── 常量 ───────────────────────────
@@ -375,7 +375,8 @@ func checkMihomoAPI(configPath string) (reachable bool, version string) {
 	if extCtrl == "" {
 		return false, ""
 	}
-	reqURL := "http://" + extCtrl + "/version"
+	u, _ := url.Parse(extCtrl)
+	reqURL := "http://" + u.Host + "/version"
 	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
 		return false, ""
@@ -528,7 +529,7 @@ func MihomoDataVersionHandler(c *gin.Context) {
 		"data": gin.H{
 			"remote_version": remoteVersion,
 			"local_version":  localVersion,
-			"has_update":     remoteVersion != "" && remoteVersion != localVersion,
+			"has_update":     remoteVersion != "" && strings.Contains(localVersion, remoteVersion),
 		},
 	})
 }
