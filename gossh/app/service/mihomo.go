@@ -558,6 +558,25 @@ func checkMihomoAPI(configPath string) (reachable bool, version string) {
 	return true, strings.TrimSpace(string(body))
 }
 
+// mihomoPreflightCheck 检查启动 mihomo 所需的前置条件，返回缺失项清单。
+// 返回空切片表示就绪。
+func mihomoPreflightCheck(dir string) []string {
+	var missing []string
+
+	if _, err := os.Stat(filepath.Join(dir, "mihomo")); err != nil {
+		missing = append(missing, "mihomo 内核 (mihomo 二进制)")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.yaml")); err != nil {
+		missing = append(missing, "配置文件 (config.yaml)")
+	}
+	for _, f := range mihomoDataFiles {
+		if _, err := os.Stat(filepath.Join(dir, f.Name)); err != nil {
+			missing = append(missing, f.Desc+" ("+f.Name+")")
+		}
+	}
+	return missing
+}
+
 func runMihomoMmSh(dir string, action string) (string, error) {
 	mmScript := filepath.Join(dir, "mm.sh")
 	if _, err := os.Stat(mmScript); err != nil {
@@ -659,6 +678,16 @@ func MihomoControlHandler(c *gin.Context) {
 	if !validActions[req.Action] {
 		c.JSON(200, gin.H{"code": 1, "msg": "无效操作: " + req.Action})
 		return
+	}
+	if req.Action == "start" || req.Action == "restart" {
+		if missing := mihomoPreflightCheck(getMihomoDir()); len(missing) > 0 {
+			c.JSON(200, gin.H{
+				"code": 2,
+				"msg":  "前置条件未满足，缺少：" + strings.Join(missing, "、"),
+				"data": gin.H{"missing": missing},
+			})
+			return
+		}
 	}
 	slog.Info("[mihomo] 执行控制命令", "action", req.Action)
 	out, err := runMihomoMmSh(getMihomoDir(), req.Action)
@@ -1039,6 +1068,34 @@ func MihomoSaveConfigHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "msg": "配置已保存"})
+}
+
+// MihomoCheckConfigHandler POST /api/mihomo/config/check
+// 调用 mihomo -t 校验 config.yaml 语法及依赖（data 文件等），不会真正启动代理。
+func MihomoCheckConfigHandler(c *gin.Context) {
+	dir := getMihomoDir()
+	binPath := filepath.Join(dir, "mihomo")
+	configPath := filepath.Join(dir, "config.yaml")
+
+	if _, err := os.Stat(binPath); err != nil {
+		c.JSON(200, gin.H{"code": 1, "msg": "mihomo 二进制不存在: " + binPath})
+		return
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		c.JSON(200, gin.H{"code": 1, "msg": "配置文件不存在: " + configPath})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binPath, "-t", "-d", dir, "-f", configPath)
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		c.JSON(200, gin.H{"code": 2, "msg": "配置校验未通过", "output": output, "err": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "msg": "配置有效", "output": output})
 }
 
 // ─────────────────────────── 开机自启 ───────────────────────────

@@ -23,16 +23,6 @@
 
           </div>
 
-          <!-- <div style="display: flex; position: relative"> -->
-            <!-- <div class="signal-bars">
-              <div
-                v-for="n in 5"
-                :key="n"
-                :class="['bar full-bar', { active: n <= signalBars }]"></div>
-            </div> -->
-            <!-- <span>{{ networkType }}{{ is5GA ? 'A' : '' }}</span> -->
-          <!-- </div> -->
-
           <div style="display: flex; align-items: center">
             <div
               :class="[
@@ -95,6 +85,28 @@
                 <span class="quick-action-subtitle">{{ mihomoStatus.running ? '代理运行中' : '代理已停止' }}</span>
               </span>
             </button>
+
+          <label class="quick-action-button" style="padding: 1px 10px;">
+  <span class="quick-action-icon">Net</span>
+
+  <span class="quick-action-copy">
+    <span class="quick-action-title" style="font-size: 13px;">数据模式</span>
+
+    <el-select
+      class="net-select"
+      v-model="d.net_select"
+      placeholder="未知"
+      @change="netSelectChange"
+    >
+      <el-option
+        v-for="opt in netSelectOptions"
+        :key="opt.value"
+        :label="opt.label"
+        :value="opt.value"
+      />
+    </el-select>
+  </span>
+</label>
 
           <button
             class="wifi-mode-button"
@@ -925,26 +937,6 @@
                 d.nr5g_bandwidth ? d.nr5g_bandwidth + ' Mhz' : '-'
               }}</span>
             </div>
-            <!-- <div class="info-item">
-              <span class="label">LTE 锁频</span>
-              <span class="value">{{ d.lte_band_lock || '-' }}</span>
-            </div> -->
-            <!-- <div class="info-item">
-              <span class="label">NR SA 锁频</span>
-              <span class="value">{{ d.nr5g_sa_band_lock || '-' }}</span>
-            </div> -->
-            <!-- <div class="info-item">
-              <span class="label">LTE 频段</span>
-              <span
-                class="value"
-                style="
-                  white-space: pre-wrap;
-                  word-wrap: break-word;
-                  overflow: hidden;
-                "
-                >{{ d.lte_band || '-' }}</span
-              >
-            </div> -->
             <div class="info-item">
               <span class="label">ICCID</span>
               <span class="value">{{ simInfo2.sim_iccid ?? '-' }}</span>
@@ -957,12 +949,7 @@
               <span class="label">IMEI</span>
               <span class="value">{{ simInfo?.values?.imei ?? '-' }}</span>
             </div>
-            <!-- <div class="info-item">
-              <span class="label">Lock Status</span>
-              <span class="value">{{
-                simInfo?.values?.lock_status ?? '-'
-              }}</span>
-            </div> -->
+
             <div class="info-item">
               <span class="label">Modem MSN</span>
               <span class="value">{{ simInfo?.values?.modem_msn ?? '-' }}</span>
@@ -1139,107 +1126,6 @@
         </div>
       </div>
 
-      
-      <!-- 频段与锁定卡片 -->
-      <!-- <div class="card">
-        <div class="card-header">
-          <h3 class="hd">
-            <img style="width: 24px" :src="LockIcon" alt="" />频段与锁定
-          </h3>
-        </div>
-        <div class="card-content">
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="label">主载波</span>
-              <span class="value">{{
-                d.wan_active_band?.toUpperCase() || '-'
-              }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">工作频段</span>
-              <span class="value"
-                >{{
-                  d.wan_active_band?.toUpperCase()
-                    ? d.wan_active_band.toUpperCase() + ', '
-                    : ''
-                }}{{ currentActiveBands || '-' }}</span
-              >
-            </div>
-            <div class="info-item">
-              <span class="label">频道</span>
-              <span class="value">{{ d.nr5g_action_channel ?? '-' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">带宽</span>
-              <span class="value">{{
-                d.nr5g_bandwidth ? d.nr5g_bandwidth + ' Mhz' : '-'
-              }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">LTE 锁频</span>
-              <span class="value">{{ d.lte_band_lock || '-' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">NR SA 锁频</span>
-              <span class="value">{{ d.nr5g_sa_band_lock || '-' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">LTE 频段</span>
-              <span
-                class="value"
-                style="
-                  white-space: pre-wrap;
-                  word-wrap: break-word;
-                  overflow: hidden;
-                "
-                >{{ d.lte_band || '-' }}</span
-              >
-            </div>
-          </div>
-        </div>
-      </div> -->
-
-      <!-- 标识信息卡片 -->
-      <!-- <div class="card">
-        <div class="card-header">
-          <h3 class="hd">
-            <img style="width: 24px" :src="TagIcon" alt="" />标识信息
-          </h3>
-        </div>
-        <div class="card-content">
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="label">ICCID</span>
-              <span class="value">{{ simInfo2.sim_iccid ?? '-' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">IMSI</span>
-              <span class="value">{{ simInfo2.sim_imsi ?? '-' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">IMEI</span>
-              <span class="value">{{ simInfo?.values?.imei ?? '-' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">Lock Status</span>
-              <span class="value">{{
-                simInfo?.values?.lock_status ?? '-'
-              }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">Modem MSN</span>
-              <span class="value">{{ simInfo?.values?.modem_msn ?? '-' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">WLAN MAC</span>
-              <span class="value">{{
-                simInfo?.values?.wlan_mac_address ?? '-'
-              }}</span>
-            </div>
-          </div>
-        </div>
-      </div> -->
-
     </div>
 
     <!-- 空状态 -->
@@ -1394,10 +1280,12 @@
           <span class="mh-meta">{{ mihomoStatus.mihomo_dir }}/config.yaml</span>
           <div style="display:flex;gap:6px">
             <el-button size="small" :icon="RefreshIcon" @click="loadMihomoConfig" :loading="mihomoConfigLoading">重新加载</el-button>
+            <el-button size="small" @click="checkMihomoConfig" :loading="mihomoConfigChecking" title="调用 mihomo -t 校验磁盘上的 config.yaml（不会包含未保存的改动）">测试配置</el-button>
             <el-button size="small" type="primary" @click="saveMihomoConfig" :loading="mihomoConfigSaving">保存</el-button>
           </div>
         </div>
         <div v-if="mihomoConfigError" class="mh-config-error">{{ mihomoConfigError }}</div>
+        <pre v-if="mihomoConfigCheckOutput" class="mh-output">{{ mihomoConfigCheckOutput }}</pre>
         <textarea
           v-model="mihomoConfigText"
           class="mh-config-editor"
@@ -1819,112 +1707,16 @@ const refreshInterval2 = ref(5000);
 let refreshTimer: number | null = null;
 let refreshTimer2: number | null = null;
 
-// 请求体定义
-// const netInfoRequest = {
-//   id: 1,
-//   service: 'zte_nwinfo_api',
-//   method: 'nwinfo_get_netinfo',
-//   params: {},
-// };
-
-// const lanRequest = {
-//   id: 2,
-//   service: 'network.interface.lan',
-//   method: 'status',
-//   params: {},
-// };
-//
-// const wanRequest = {
-//   id: 3,
-//   service: 'network.interface.zte_wan',
-//   method: 'status',
-//   params: {},
-// };
-//
-// const wan6Request = {
-//   id: 4,
-//   service: 'network.interface.zte_wan6',
-//   method: 'status',
-//   params: {},
-// };
-//
-// const trafficRequest = {
-//   id: 5,
-//   service: 'zwrt_data',
-//   method: 'get_wwandst',
-//   params: { source_module: 'web', cid: 1, type: 4 },
-// };
-//
-// const simInfoRequest = {
-//   id: 6,
-//   service: 'uci',
-//   method: 'get',
-//   params: {
-//     config: 'zwrt_zte_mdm',
-//     section: 'device_info',
-//   },
-// };
-//
-// const simInfo2Request = {
-//   id: 7,
-//   service: 'zwrt_zte_mdm.api',
-//   method: 'get_sim_info',
-//   params: {},
-// };
-//
-// const deviceInfoRequest = {
-//   id: 8,
-//   service: 'zwrt_mc.device.manager',
-//   method: 'get_device_info',
-//   params: {},
-// };
-//
-// const cpuTempRequest = {
-//   id: 9,
-//   service: 'zwrt_bsp.thermal',
-//   method: 'get_cpu_temp',
-//   params: {},
-// };
-//
-// const wwanRequest = {
-//   id: 10,
-//   service: 'zwrt_data',
-//   method: 'get_wwaniface',
-//   params: {
-//     source_module: 'web',
-//     cid: 1,
-//     connect_status: '',
-//   },
-// };
-//
-// const lanUserListRequest = {
-//   id: 11,
-//   service: 'zwrt_router.api',
-//   method: 'router_get_user_list_num',
-//   params: {},
-// };
-//
-// const openAdbRequest = {
-//   id: 12,
-//   service: 'zwrt_bsp.usb',
-//   method: 'set',
-//   params: {
-//     mode: 'debug',
-//   },
-// };
-//
-// const closeAdbRequest = {
-//   id: 13,
-//   service: 'zwrt_bsp.usb',
-//   method: 'set',
-//   params: {
-//     mode: 'user',
-//   },
-// };
-
 // session 固定值（未登录）
 const SESSION_ID = '00000000000000000000000000000000'
 
+// 网络制式选择（5G/4G、5G SA、5G NSA、4G）
+const netSelectOptions = [
+  { value: 'WL_AND_5G',  label: 'Auto' },
+  { value: 'Only_5G',    label: '5G SA' },
+  { value: 'LTE_AND_5G', label: '5G NSA' },
+  { value: 'Only_LTE',   label: '4G LTE' },
+]
 // 1.网络信息
 const netInfoRequest = {
   jsonrpc: '2.0',
@@ -2077,36 +1869,6 @@ const wifiStatusRequest = {
     {},
   ],
 }
-
-// 打开 ADB
-// const openAdbRequest = {
-//   jsonrpc: '2.0',
-//   id: 12,
-//   method: 'call',
-//   params: [
-//     SESSION_ID,
-//     'zwrt_bsp.usb',
-//     'set',
-//     {
-//       mode: 'debug',
-//     },
-//   ],
-// }
-
-// 关闭 ADB
-// const closeAdbRequest = {
-//   jsonrpc: '2.0',
-//   id: 13,
-//   method: 'call',
-//   params: [
-//     SESSION_ID,
-//     'zwrt_bsp.usb',
-//     'set',
-//     {
-//       mode: 'user',
-//     },
-//   ],
-// }
 
 // 系统版本信息
 const sysVersionRequest = {
@@ -2421,6 +2183,29 @@ function toggleSignalHelp(type: SignalType, metric: SignalMetric) {
   openedSignalHelp.value = openedSignalHelp.value === key ? null : key;
 }
 
+async function netSelectChange(value: string) {
+  // console.log('网络模式切换到', value);
+  try {
+    await callUbusBatch([
+      {
+        jsonrpc: '2.0',
+        id: 20,
+        method: 'call',
+        params: [
+          SESSION_ID,
+          'zte_nwinfo_api',
+          'nwinfo_set_netselect',
+          {"net_select":value},
+        ],
+      }
+    ])
+    ElMessage.success('模式切换成功');
+  } catch (err) {
+    console.error('模式切换失败', err);
+    ElMessage.error('模式切换失败');
+  }
+}
+
 function getSignalStatus(metric: SignalMetric, rawValue: unknown): SignalStatus {
   if (rawValue === null || rawValue === undefined || rawValue === '') {
     return signalStatusMap.unknown;
@@ -2570,18 +2355,7 @@ const netWorkProvider = computed(() => {
   };
   // 优先走 code 映射，映射不到再走后端全名
   return providerMap[provider] ?? fullname ?? '-';
-  // return (providerMap[Operator] ?? Operator ) + (Operator === provider ? '' : '(' + (providerMap[provider] ?? fullname ?? '') + ')');
 });
-
-// API 调用函数
-// async function callUbus<T>(request: any): Promise<T> {
-//   const response = await axios.post<UbusResponse<T>>('/api/ubus', request);
-//   if (response.data.code === 0) {
-//     return response.data.result as T;
-//   } else {
-//     throw new Error(response.data.msg || '接口返回错误');
-//   }
-// }
 
 async function callUbusBatch(
     requests: any[]
@@ -2600,57 +2374,6 @@ async function callUbusBatch(
   }
   return map
 }
-
-// async function fetchAllData() {
-//   loading.value = true;
-//   error.value = null;
-//
-//   try {
-//     // 并行请求所有数据
-//     const [
-//       netInfo,
-//       lan,
-//       wan,
-//       wan6,
-//       traffic,
-//       device,
-//       cpuTempData,
-//       simInfoData,
-//       simInfo2Data,
-//       wwanInfoData,
-//       lanUserData,
-//     ] = await Promise.all([
-//       callUbus<NetInfoResult>(netInfoRequest),
-//       callUbus<NetworkInterface>(lanRequest),
-//       callUbus<NetworkInterface>(wanRequest),
-//       callUbus<NetworkInterface>(wan6Request),
-//       callUbus<TrafficData>(trafficRequest),
-//       callUbus<DeviceInfo>(deviceInfoRequest),
-//       callUbus<CpuTemp>(cpuTempRequest),
-//       callUbus<SimInfo>(simInfoRequest),
-//       callUbus<SimInfo2>(simInfo2Request),
-//       callUbus<WwanInfo>(wwanRequest),
-//       callUbus<LanUserList>(lanUserListRequest),
-//     ]);
-//
-//     data.value = netInfo;
-//     lanData.value = lan;
-//     wanData.value = wan;
-//     wan6Data.value = wan6;
-//     trafficData.value = traffic;
-//     deviceInfo.value = device;
-//     cpuTemp.value = cpuTempData;
-//     simInfo.value = simInfoData;
-//     simInfo2.value = simInfo2Data;
-//     wwanInfo.value = wwanInfoData;
-//     lanUserList.value = lanUserData;
-//   } catch (e: any) {
-//     error.value = e?.message || '请求失败';
-//     console.error('数据获取失败:', e);
-//   } finally {
-//     loading.value = false;
-//   }
-// }
 
 async function fetchAllData() {
   loading.value = true
@@ -2690,16 +2413,7 @@ async function fetchAllData2() {
   error.value = null
   try {
     const resultMap = await callUbusBatch(batchRequests2)
-    // 按 id 取值（清晰又稳定）
-    // data.value        = resultMap[1]
-    // lanData.value     = resultMap[2]
-    // wanData.value     = resultMap[3]
-    // wan6Data.value    = resultMap[4]
-    // trafficData.value = resultMap[5]
     deviceInfo.value  = resultMap[6]
-    // cpuTemp.value     = resultMap[7]
-    // simInfo.value     = resultMap[8]
-    // simInfo2.value    = resultMap[9]
     wwanInfo.value    = resultMap[10]
     lanUserList.value = resultMap[11]
   } catch (e: any) {
@@ -2708,7 +2422,6 @@ async function fetchAllData2() {
   } finally {
     loading.value = false
   }
-
 }
 
 
@@ -2728,13 +2441,6 @@ function toggleAutoRefresh() {
   } else {
     stopAutoRefresh();
     ElMessage.warning('已停止刷新');
-  }
-}
-
-function updateRefreshInterval() {
-  if (autoRefresh.value) {
-    stopAutoRefresh();
-    startAutoRefresh();
   }
 }
 
@@ -2759,7 +2465,6 @@ function stopAutoRefresh() {
   }
 }
 
-const adbOpened = ref(false)
 function handleOpenAdbClick() {
   if (usbStatus?.value.connect != 1) {
     ElMessage.warning('请先连接数据线再试')
@@ -2788,8 +2493,6 @@ function oneClickDebug() {
     })
 }
 
-// function oneClickDebugClose() { ... }
-
 // ─────────────────────────── Mihomo ───────────────────────────
 
 interface MihomoFileInfo { name: string; desc: string; exists: boolean; size: number; mod_time: string }
@@ -2816,8 +2519,10 @@ const mihomoCheckingVersion = ref(false)
 const mihomoBinaryChecking = ref(false)
 const mihomoConfigLoading = ref(false)
 const mihomoConfigSaving = ref(false)
+const mihomoConfigChecking = ref(false)
 const mihomoConfigText = ref('')
 const mihomoConfigError = ref('')
+const mihomoConfigCheckOutput = ref('')
 const mihomoUninstalling = ref('')
 const mihomoAutostartChanging = ref(false)
 let mihomoUpdatePollTimer: ReturnType<typeof setInterval> | null = null
@@ -3020,6 +2725,26 @@ async function saveMihomoConfig() {
     ElMessage.error('保存失败: ' + (e.message ?? e))
   } finally {
     mihomoConfigSaving.value = false
+  }
+}
+
+async function checkMihomoConfig() {
+  mihomoConfigChecking.value = true
+  mihomoConfigCheckOutput.value = ''
+  try {
+    const res = await axios.post('/api/mihomo/config/check')
+    const output = (res.data.output ?? '').trim()
+    if (res.data.code === 0) {
+      ElMessage.success(res.data.msg || '配置有效')
+      mihomoConfigCheckOutput.value = output || '配置校验通过。'
+    } else {
+      ElMessage.error(res.data.msg || '配置校验失败')
+      mihomoConfigCheckOutput.value = output || (res.data.msg ?? '')
+    }
+  } catch (e: any) {
+    ElMessage.error('请求失败: ' + (e.message ?? e))
+  } finally {
+    mihomoConfigChecking.value = false
   }
 }
 
@@ -3452,6 +3177,24 @@ onUnmounted(() => {
   .mh-control-row { gap: 6px; }
   .mh-install-version-card { padding: 10px 12px; }
 }
+
+/* select 外层 */
+.net-select {
+  width:68px;
+}
+
+:deep(.el-select__wrapper) {
+  min-height: 14px;
+  height: 14px;
+  width: 68px;
+  padding: 1px 3px;
+  font-size: 11px;
+}
+
+:deep(.el-select__selected-item){
+  color: rgb(6 6 6 / 59%)
+}
+
 
 .wifi-mode-button.active {
   border-color: rgba(251, 191, 36, 0.48);

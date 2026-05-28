@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"gossh/app/config"
+	"gossh/app/logger"
 	"gossh/app/middleware"
 	"gossh/app/model"
 	"gossh/app/service"
@@ -816,8 +817,10 @@ func initApplication() {
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
 	service.MaybeExecShellHelper()
 	initApplication()
+	logger.Init(filepath.Join(config.WorkDir, "webssh.log"))
 
 	gin.SetMode(gin.ReleaseMode)
 	var engine = gin.Default()
@@ -982,6 +985,7 @@ func main() {
 		// 配置文件管理
 		auth.GET("/api/mihomo/config", service.MihomoGetConfigHandler)
 		auth.PUT("/api/mihomo/config", service.MihomoSaveConfigHandler)
+		auth.POST("/api/mihomo/config/check", service.MihomoCheckConfigHandler)
 		// 开机自启
 		auth.GET("/api/mihomo/autostart", service.MihomoGetAutostartHandler)
 		auth.POST("/api/mihomo/autostart", service.MihomoSetAutostartHandler)
