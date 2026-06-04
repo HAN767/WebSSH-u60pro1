@@ -73,7 +73,7 @@
           <button class="quick-action-button" @click="openNetworkSettingsDialog">
             <span class="quick-action-icon">Net</span>
             <span class="quick-action-copy">
-              <span class="quick-action-title" style="font-size: 13px;">网络设置</span>
+              <span class="quick-action-title">网络设置</span>
               <span class="quick-action-subtitle">{{ networkSettingsSummary }}</span>
             </span>
           </button>
@@ -83,9 +83,9 @@
             :class="{ active: localSpeedTest.running }"
             @click="openLocalSpeedTestDialog"
           >
-            <span class="quick-action-icon">LAN</span>
+            <span class="quick-action-icon">NET</span>
             <span class="quick-action-copy">
-              <span class="quick-action-title">内网测速</span>
+              <span class="quick-action-title">流量测速</span>
               <span class="quick-action-subtitle">{{ localSpeedTest.running ? '测速中...' : localSpeedTestSummary }}</span>
             </span>
           </button>
@@ -1381,22 +1381,28 @@
         <section class="settings-section wifi-radio-card">
           <div>
             <div class="settings-section-title">2.4G WiFi</div>
-            <div class="wifi-radio-subtitle">{{ wifiForm.wifi24_enabled ? '当前已开启' : '当前已关闭' }}</div>
+            <div class="wifi-radio-subtitle">{{ wifiForm.wifi24_enabled ? '当前已开启' : '当前已关闭' }}，应用后立即生效</div>
           </div>
-          <el-switch
-            v-model="wifiForm.wifi24_enabled"
-            active-text="开启"
-            inactive-text="关闭" />
+          <div class="wifi-card-control">
+            <el-switch
+              v-model="wifiForm.wifi24_enabled"
+              active-text="开启"
+              inactive-text="关闭" />
+            <el-button size="small" type="primary" :loading="wifiSettingsSaving === 'radio24'" @click="applyWifi24State">应用</el-button>
+          </div>
         </section>
         <section class="settings-section wifi-radio-card">
           <div>
             <div class="settings-section-title">5G WiFi</div>
-            <div class="wifi-radio-subtitle">{{ wifiForm.wifi5_enabled ? '当前已开启' : '当前已关闭' }}</div>
+            <div class="wifi-radio-subtitle">{{ wifiForm.wifi5_enabled ? '当前已开启' : '当前已关闭' }}，应用后立即生效</div>
           </div>
-          <el-switch
-            v-model="wifiForm.wifi5_enabled"
-            active-text="开启"
-            inactive-text="关闭" />
+          <div class="wifi-card-control">
+            <el-switch
+              v-model="wifiForm.wifi5_enabled"
+              active-text="开启"
+              inactive-text="关闭" />
+            <el-button size="small" type="primary" :loading="wifiSettingsSaving === 'radio5'" @click="applyWifi5State">应用</el-button>
+          </div>
         </section>
       </div>
       <section class="settings-section">
@@ -1414,6 +1420,9 @@
               v-model="wifiForm.high_performance"
               active-text="高性能"
               inactive-text="省电" />
+            <div class="settings-actions wifi-setting-actions">
+              <el-button size="small" type="primary" :loading="wifiSettingsSaving === 'psm'" @click="applyWifiPerformanceSetting">应用</el-button>
+            </div>
           </div>
           <div class="wifi-tuning-item wifi-power-control">
             <div class="settings-title-row">
@@ -1432,47 +1441,72 @@
                 <small>{{ opt.value }}%</small>
               </button>
             </div>
+            <div class="settings-actions wifi-setting-actions">
+              <el-button size="small" type="primary" :loading="wifiSettingsSaving === 'txpower'" @click="applyWifiTxPowerSetting">应用</el-button>
+            </div>
           </div>
           <div class="wifi-tuning-item">
             <div class="settings-title-row">
               <span class="settings-section-title">国家码</span>
               <el-tooltip
-                content="国家码会同时应用到 2.4G 和 5G WiFi，影响可用信道和发射限制。通常中国大陆填写 CN。"
+                content="国家码会同时应用到 2.4G 和 5G WiFi，重启后生效，并会使 2.4G 和 5G 都处于开启状态。它会影响可用信道和发射限制，通常中国大陆填写 CN。"
                 placement="top">
                 <span class="settings-help-icon">!</span>
               </el-tooltip>
             </div>
             <el-input v-model="wifiForm.country" maxlength="2" placeholder="CN" />
+            <div class="settings-actions wifi-setting-actions">
+              <el-button size="small" type="primary" :loading="wifiSettingsSaving === 'country'" @click="applyWifiCountrySetting">应用</el-button>
+            </div>
           </div>
         </div>
       </section>
     </div>
     <template #footer>
       <el-button @click="wifiSettingsDialogVisible = false">关闭</el-button>
-      <el-button type="primary" :loading="wifiSettingsSaving === 'all'" @click="saveAndApplyWifiSettings">保存并应用</el-button>
     </template>
   </el-dialog>
 
-  <!-- ───────── 内网测速弹窗 ───────── -->
+  <!-- ───────── 流量测速弹窗 ───────── -->
   <el-dialog
     v-model="localSpeedTestDialogVisible"
-    title="内网测速"
-    width="min(520px, 96vw)"
+    title="流量测速"
+    width="min(640px, 96vw)"
     :close-on-click-modal="!localSpeedTest.running"
     class="wireless-dialog">
     <div class="local-speedtest-panel">
       <div class="local-speedtest-header">
         <div>
-          <div class="settings-section-title">测试大小</div>
-          <div class="local-speedtest-hint">浏览器从本机后端下载测试数据，结果反映当前内网链路吞吐。</div>
+          <div class="settings-section-title">测速地址</div>
+          <div class="local-speedtest-hint">设备端通过当前外网下载该地址，浏览器读取转发流并计算速度。默认使用原神下载源。</div>
         </div>
-        <el-select v-model="localSpeedTest.size" class="local-speedtest-size">
-          <el-option :value="50" label="50 MB" />
-          <el-option :value="100" label="100 MB" />
-          <el-option :value="200" label="200 MB" />
-          <el-option :value="500" label="500 MB" />
-          <el-option :value="1024" label="1024 MB" />
-        </el-select>
+        <el-input
+          v-model="localSpeedTest.url"
+          class="local-speedtest-url"
+          :disabled="localSpeedTest.running"
+          placeholder="https://..."
+          clearable />
+      </div>
+
+      <div class="local-speedtest-options">
+        <div class="local-speedtest-option">
+          <span>下载线程</span>
+          <el-input-number
+            v-model="localSpeedTest.threads"
+            :min="1"
+            :max="16"
+            :step="1"
+            :disabled="localSpeedTest.running"
+            controls-position="right" />
+        </div>
+        <div class="local-speedtest-option">
+          <span>循环下载</span>
+          <el-switch
+            v-model="localSpeedTest.loop"
+            :disabled="localSpeedTest.running"
+            active-text="开启"
+            inactive-text="关闭" />
+        </div>
       </div>
 
       <div class="local-speedtest-meter">
@@ -1499,13 +1533,17 @@
           <span>耗时</span>
           <strong>{{ localSpeedTest.elapsed }}</strong>
         </div>
+        <div>
+          <span>线程</span>
+          <strong>{{ localSpeedTest.activeThreads || localSpeedTest.threads }}</strong>
+        </div>
       </div>
 
       <div v-if="localSpeedTest.message" class="local-speedtest-message">{{ localSpeedTest.message }}</div>
     </div>
     <template #footer>
       <el-button @click="localSpeedTestDialogVisible = false" :disabled="localSpeedTest.running">关闭</el-button>
-      <el-button v-if="localSpeedTest.running" type="danger" @click="stopLocalSpeedTest">停止</el-button>
+      <el-button v-if="localSpeedTest.running" type="danger" @click="() => stopLocalSpeedTest()">停止</el-button>
       <el-button v-else type="primary" @click="startLocalSpeedTest">开始测速</el-button>
     </template>
   </el-dialog>
@@ -1962,7 +2000,7 @@ const wifiTxPowerOptions = [
 ];
 
 type NetworkApplyTarget = '' | 'mode' | 'lteBand' | 'nrBand' | 'lteCell' | 'nrCell';
-type WifiApplyTarget = '' | 'psm' | 'settings' | 'all';
+type WifiApplyTarget = '' | 'radio24' | 'radio5' | 'psm' | 'txpower' | 'country' | 'settings' | 'all';
 
 interface DeviceSettings {
   wifi24_enabled?: boolean;
@@ -2015,10 +2053,17 @@ const wifiSettingsSummary = computed(() => {
 });
 
 const localSpeedTestDialogVisible = ref(false);
-let localSpeedTestController: AbortController | null = null;
+let localSpeedTestWorkers: Worker[] = [];
+const TRAFFIC_SPEEDTEST_DEFAULT_URL = 'https://autopatchcn.yuanshen.com/client_app/download/pc_zip/20211117173857_8JkfDHNPmqKi67qR/YuanShen_2.3.0.zip';
+const TRAFFIC_SPEEDTEST_URL_STORAGE_KEY = 'trafficSpeedTestUrl';
+const TRAFFIC_SPEEDTEST_THREADS_STORAGE_KEY = 'trafficSpeedTestThreads';
+const TRAFFIC_SPEEDTEST_LOOP_STORAGE_KEY = 'trafficSpeedTestLoop';
 const localSpeedTest = reactive({
   running: false,
-  size: 200,
+  url: localStorage.getItem(TRAFFIC_SPEEDTEST_URL_STORAGE_KEY) || TRAFFIC_SPEEDTEST_DEFAULT_URL,
+  threads: normalizeSpeedTestThreads(localStorage.getItem(TRAFFIC_SPEEDTEST_THREADS_STORAGE_KEY)),
+  loop: localStorage.getItem(TRAFFIC_SPEEDTEST_LOOP_STORAGE_KEY) === '1',
+  activeThreads: 0,
   progress: 0,
   currentSpeed: '-- Mbps',
   avgSpeed: '-- Mbps',
@@ -2033,6 +2078,12 @@ const localSpeedTestSummary = computed(() => {
 
 function openLocalSpeedTestDialog() {
   localSpeedTestDialogVisible.value = true;
+}
+
+function normalizeSpeedTestThreads(value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 4;
+  return Math.max(1, Math.min(16, Math.round(n)));
 }
 
 function formatSpeedMbps(bytesPerSecond: number) {
@@ -2052,38 +2103,59 @@ function resetLocalSpeedTestResult() {
   localSpeedTest.avgSpeed = '-- Mbps';
   localSpeedTest.downloaded = '0 MB';
   localSpeedTest.elapsed = '0.00 秒';
+  localSpeedTest.activeThreads = 0;
   localSpeedTest.message = '';
 }
 
-function stopLocalSpeedTest() {
-  localSpeedTestController?.abort();
+function stopLocalSpeedTest(message: unknown = '测速已停止') {
+  if (!localSpeedTest.running) return;
+  const finalMessage = typeof message === 'string' ? message : '测速已停止';
+  localSpeedTest.message = '正在停止测速...';
+  localSpeedTestWorkers.forEach(worker => {
+    try {
+      worker.postMessage({ type: 'stop' });
+    } catch {
+      // ignore
+    }
+    worker.terminate();
+  });
+  localSpeedTestWorkers = [];
+  localSpeedTest.running = false;
+  localSpeedTest.activeThreads = 0;
+  localSpeedTest.message = finalMessage;
 }
 
-// 并发流数：单条 TCP 流受拥塞窗口/RTT/WiFi airtime 限制，难以打满千兆+链路，
-// 多条并行连接聚合吞吐才能测出真实带宽（同 Speedtest / LibreSpeed / iperf3 -P 的做法）。
-const SPEEDTEST_STREAMS = 6;
 // 预热时长（毫秒）：忽略 TCP 慢启动爬坡阶段，平均速度只统计进入稳态后的数据，提升准确度。
 const SPEEDTEST_GRACE_MS = 800;
 
 async function startLocalSpeedTest() {
   if (localSpeedTest.running) return;
+  const testUrl = String(localSpeedTest.url || '').trim();
+  if (!/^https?:\/\//i.test(testUrl)) {
+    ElMessage.error('请输入 http/https 测速地址');
+    return;
+  }
+  localSpeedTest.url = testUrl;
+  localSpeedTest.threads = normalizeSpeedTestThreads(localSpeedTest.threads);
+  localStorage.setItem(TRAFFIC_SPEEDTEST_URL_STORAGE_KEY, testUrl);
+  localStorage.setItem(TRAFFIC_SPEEDTEST_THREADS_STORAGE_KEY, String(localSpeedTest.threads));
+  localStorage.setItem(TRAFFIC_SPEEDTEST_LOOP_STORAGE_KEY, localSpeedTest.loop ? '1' : '0');
   resetLocalSpeedTestResult();
   localSpeedTest.running = true;
   localSpeedTest.message = '正在准备测速...';
-  localSpeedTestController = new AbortController();
 
   const token = localStorage.getItem('token') || '';
-  const totalMB = localSpeedTest.size;
-  const streams = Math.max(1, Math.min(SPEEDTEST_STREAMS, totalMB));
-  const perStreamMB = Math.max(1, Math.ceil(totalMB / streams));
-  const targetBytes = perStreamMB * streams * 1024 * 1024;
+  const streams = localSpeedTest.threads;
 
   let totalBytes = 0;
+  let targetBytes = 0;
   let firstByteTime = 0;       // 首字节到达时间：从这里开始计时，排除连接建立耗时
   let measureStartTime = 0;    // 预热结束、计入平均速度的起点
   let measuredBaseBytes = 0;   // measureStartTime 时刻已下载的字节数
   let lastUpdateTime = 0;
   let lastBytes = 0;
+  let finishedWorkers = 0;
+  let failed = false;
 
   const refreshUi = (now: number) => {
     if (now - lastUpdateTime < 200) return;
@@ -2092,44 +2164,14 @@ async function startLocalSpeedTest() {
     if (deltaSeconds > 0) localSpeedTest.currentSpeed = formatSpeedMbps(deltaBytes / deltaSeconds);
     localSpeedTest.downloaded = formatSpeedTestBytes(totalBytes);
     localSpeedTest.elapsed = `${((now - firstByteTime) / 1000).toFixed(2)} 秒`;
-    localSpeedTest.progress = Math.min(100, Math.round((totalBytes / targetBytes) * 100));
+    localSpeedTest.progress = targetBytes > 0 ? Math.min(100, Math.round((totalBytes / targetBytes) * 100)) : 0;
     lastUpdateTime = now;
     lastBytes = totalBytes;
   };
 
-  const pump = async (idx: number) => {
-    const res = await fetch(`/api/speedtest?size=${perStreamMB}&n=${idx}&t=${Date.now()}`, {
-      signal: localSpeedTestController!.signal,
-      cache: 'no-store',
-      headers: token ? { Authorization: token } : {},
-    });
-    if (!res.ok) throw new Error(`请求失败: ${res.status}`);
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('浏览器不支持流式读取');
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const now = performance.now();
-      if (firstByteTime === 0) {
-        firstByteTime = now;
-        lastUpdateTime = now;
-        localSpeedTest.message = '测速中...';
-      }
-      totalBytes += value.length;
-      // 预热结束后锚定测速基准点
-      if (measureStartTime === 0 && now - firstByteTime >= SPEEDTEST_GRACE_MS) {
-        measureStartTime = now;
-        measuredBaseBytes = totalBytes;
-      }
-      refreshUi(now);
-    }
-  };
-
-  try {
-    await Promise.all(Array.from({ length: streams }, (_, i) => pump(i)));
-
+  const finishSpeedTest = (message = '测速完成') => {
+    if (!localSpeedTest.running) return;
     const endTime = performance.now();
-    // 平均速度优先取「预热后的稳态区间」；若样本太短则回退到整体平均
     let avgBytes = totalBytes;
     let avgSeconds = Math.max((endTime - (firstByteTime || endTime)) / 1000, 0.001);
     if (measureStartTime > 0 && endTime - measureStartTime >= 300) {
@@ -2141,19 +2183,74 @@ async function startLocalSpeedTest() {
     localSpeedTest.avgSpeed = formatSpeedMbps(avg);
     localSpeedTest.downloaded = formatSpeedTestBytes(totalBytes);
     localSpeedTest.elapsed = `${((endTime - (firstByteTime || endTime)) / 1000).toFixed(2)} 秒`;
-    localSpeedTest.progress = 100;
-    localSpeedTest.message = '测速完成';
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      localSpeedTest.message = '测速已停止';
-    } else {
-      localSpeedTest.message = err?.message || '测速失败';
-      ElMessage.error(localSpeedTest.message);
-    }
-  } finally {
+    localSpeedTest.progress = targetBytes > 0 ? 100 : localSpeedTest.progress;
+    localSpeedTest.message = message;
     localSpeedTest.running = false;
-    localSpeedTestController = null;
-  }
+    localSpeedTest.activeThreads = 0;
+    localSpeedTestWorkers.forEach(worker => worker.terminate());
+    localSpeedTestWorkers = [];
+  };
+
+  const handleWorkerMessage = (event: MessageEvent<any>) => {
+    const data = event.data || {};
+    if (data.type === 'length') {
+      const bytes = Number(data.bytes);
+      if (Number.isFinite(bytes) && bytes > 0) targetBytes += bytes;
+      return;
+    }
+    if (data.type === 'progress') {
+      const bytes = Number(data.bytes);
+      if (!Number.isFinite(bytes) || bytes <= 0) return;
+      const now = performance.now();
+      if (firstByteTime === 0) {
+        firstByteTime = now;
+        lastUpdateTime = now;
+        localSpeedTest.message = localSpeedTest.loop ? '循环测速中...' : '测速中...';
+      }
+      totalBytes += bytes;
+      if (measureStartTime === 0 && now - firstByteTime >= SPEEDTEST_GRACE_MS) {
+        measureStartTime = now;
+        measuredBaseBytes = totalBytes;
+      }
+      refreshUi(now);
+      return;
+    }
+    if (data.type === 'done' || data.type === 'stopped') {
+      finishedWorkers += 1;
+      localSpeedTest.activeThreads = Math.max(0, streams - finishedWorkers);
+      if (!localSpeedTest.loop && finishedWorkers >= streams) finishSpeedTest('测速完成');
+      return;
+    }
+    if (data.type === 'error') {
+      failed = true;
+      const msg = data.message || '测速失败';
+      localSpeedTest.message = msg;
+      ElMessage.error(msg);
+      stopLocalSpeedTest(msg);
+    }
+  };
+
+  localSpeedTest.activeThreads = streams;
+  localSpeedTestWorkers = Array.from({ length: streams }, (_, idx) => {
+    const worker = new Worker(new URL('../workers/trafficSpeedtest.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = handleWorkerMessage;
+    worker.onerror = (event) => {
+      if (failed) return;
+      failed = true;
+      const msg = event.message || '测速线程异常';
+      localSpeedTest.message = msg;
+      ElMessage.error(msg);
+      stopLocalSpeedTest(msg);
+    };
+    worker.postMessage({
+      type: 'start',
+      id: idx,
+      url: testUrl,
+      token,
+      loop: localSpeedTest.loop,
+    });
+    return worker;
+  });
 }
 // 1.网络信息
 const netInfoRequest = {
@@ -2919,6 +3016,100 @@ async function setWifiUciSettings() {
     wifi1: wifiAttrs(wifiForm.txpower, wifiForm.country),
   });
   if (res.data.code !== 0) throw new Error(res.data.msg || 'WiFi 参数应用失败');
+}
+
+async function setWifiTxPowerSettings() {
+  const res = await axios.post('/api/wifi/settings', {
+    wifi0: wifiAttrs(wifiForm.txpower, ''),
+    wifi1: wifiAttrs(wifiForm.txpower, ''),
+  });
+  if (res.data.code !== 0) throw new Error(res.data.msg || '发射功率应用失败');
+}
+
+async function setWifiCountrySettings() {
+  const country = String(wifiForm.country || '').trim().toUpperCase();
+  if (!/^[A-Za-z]{2}$/.test(country)) throw new Error('国家码必须是 2 位字母');
+  wifiForm.country = country;
+  const res = await axios.post('/api/wifi/settings', {
+    wifi0: wifiAttrs(0, country),
+    wifi1: wifiAttrs(0, country),
+  });
+  if (res.data.code !== 0) throw new Error(res.data.msg || '国家码应用失败');
+}
+
+async function applyWifi24State() {
+  wifiSettingsSaving.value = 'radio24';
+  try {
+    await setWifiRadioState('wlan0', wifiForm.wifi24_enabled);
+    await persistDeviceSettings();
+    setTimeout(psmGetHandler, 2500);
+    ElMessage.success('2.4G WiFi 设置已立即生效');
+  } catch (err: any) {
+    ElMessage.error(err.message || '2.4G WiFi 设置应用失败');
+  } finally {
+    wifiSettingsSaving.value = '';
+  }
+}
+
+async function applyWifi5State() {
+  wifiSettingsSaving.value = 'radio5';
+  try {
+    await setWifiRadioState('wlan2', wifiForm.wifi5_enabled);
+    await persistDeviceSettings();
+    setTimeout(psmGetHandler, 2500);
+    ElMessage.success('5G WiFi 设置已立即生效');
+  } catch (err: any) {
+    ElMessage.error(err.message || '5G WiFi 设置应用失败');
+  } finally {
+    wifiSettingsSaving.value = '';
+  }
+}
+
+async function applyWifiPerformanceSetting() {
+  wifiSettingsSaving.value = 'psm';
+  try {
+    await setWifiPerformance(wifiForm.high_performance);
+    await persistDeviceSettings();
+    psmGetHandler();
+    ElMessage.success('WiFi 性能模式已应用');
+  } catch (err: any) {
+    ElMessage.error(err.message || 'WiFi 性能模式应用失败');
+  } finally {
+    wifiSettingsSaving.value = '';
+  }
+}
+
+async function applyWifiTxPowerSetting() {
+  wifiSettingsSaving.value = 'txpower';
+  try {
+    await setWifiTxPowerSettings();
+    await persistDeviceSettings();
+    loadWifiSettings();
+    ElMessage.success('WiFi 发射功率已应用');
+  } catch (err: any) {
+    ElMessage.error(err.message || 'WiFi 发射功率应用失败');
+  } finally {
+    wifiSettingsSaving.value = '';
+  }
+}
+
+async function applyWifiCountrySetting() {
+  wifiSettingsSaving.value = 'country';
+  try {
+    await setWifiCountrySettings();
+    wifiForm.wifi24_enabled = true;
+    wifiForm.wifi5_enabled = true;
+    await persistDeviceSettings();
+    setTimeout(() => {
+      psmGetHandler();
+      loadWifiSettings();
+    }, 3000);
+    ElMessage.success('国家码已应用，2.4G 和 5G 会自动开启');
+  } catch (err: any) {
+    ElMessage.error(err.message || '国家码应用失败');
+  } finally {
+    wifiSettingsSaving.value = '';
+  }
 }
 
 async function persistDeviceSettings() {
@@ -4179,7 +4370,7 @@ onUnmounted(() => {
 
 .quick-action-title,
 .wifi-mode-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -5709,9 +5900,38 @@ onUnmounted(() => {
   line-height: 1.5;
 }
 
-.local-speedtest-size {
-  width: 128px;
-  flex: 0 0 auto;
+.local-speedtest-url {
+  width: min(360px, 100%);
+  flex: 1 1 260px;
+}
+
+.local-speedtest-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.local-speedtest-option {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.local-speedtest-option > span {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.local-speedtest-option .el-input-number {
+  width: 120px;
 }
 
 .local-speedtest-meter {
@@ -5737,7 +5957,7 @@ onUnmounted(() => {
 
 .local-speedtest-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
 
@@ -5773,15 +5993,31 @@ onUnmounted(() => {
 @media (max-width: 560px) {
   .local-speedtest-header {
     flex-direction: column;
+    gap: 10px;
+    padding: 12px;
   }
-  .local-speedtest-size {
+  .local-speedtest-url {
     width: 100%;
+    flex: 0 1 auto;
+  }
+  .local-speedtest-options {
+    grid-template-columns: 1fr;
+  }
+  .local-speedtest-option {
+    padding: 10px 12px;
   }
   .local-speedtest-stats {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .local-speedtest-meter {
+    padding: 14px;
   }
   .local-speedtest-value {
     font-size: 28px;
+  }
+  .local-speedtest-hint {
+    font-size: 11px;
+    line-height: 1.45;
   }
 }
 
@@ -6619,9 +6855,23 @@ onUnmounted(() => {
   gap: 14px;
 }
 
+.wifi-card-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
 .wifi-radio-subtitle {
   color: rgba(255, 255, 255, 0.56);
   font-size: 12px;
+}
+
+.wifi-setting-actions {
+  margin-top: 2px;
+  justify-content: flex-end;
 }
 
 .cell-lock-block {
@@ -6665,6 +6915,17 @@ onUnmounted(() => {
   .cell-lock-grid,
   .wifi-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .wifi-radio-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wifi-card-control,
+  .wifi-setting-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 </style>

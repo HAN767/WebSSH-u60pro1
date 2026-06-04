@@ -1,50 +1,52 @@
 package service
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
-	"strconv"
+	"net/url"
+	"strings"
+	"time"
 
 	"gossh/gin"
 )
 
-// 允许的最大并发测速流。前端会发起多条并行连接以打满链路，
-// 因此这里要留出足够余量（> 前端并发流数），否则多余的流会被 429 拒绝。
+const defaultTrafficSpeedTestURL = "https://autopatchcn.yuanshen.com/client_app/download/pc_zip/20211117173857_8JkfDHNPmqKi67qR/YuanShen_2.3.0.zip"
+
+// 允许的最大并发测速流。前端会发起多条并行连接以打满链路，留出余量避免 429。
 var speedTestLimiter = make(chan struct{}, 16)
 
-// 预生成 1MB 随机数据块。
-// 使用伪随机内容（而非全 0/全 0x66）是为了让数据不可压缩：
-// 一旦链路上存在 gzip / 透明代理压缩，规则数据会被压成极小体积，
-// 前端却按解压后的字节数计速，导致测速结果严重虚高或失真。
-// 这里用一个零依赖的 xorshift 填充，init 期一次性生成后全程复用。
-var speedTestChunk = func() []byte {
-	buf := make([]byte, 1024*1024)
-	seed := uint32(2463534242)
-	for i := range buf {
-		seed ^= seed << 13
-		seed ^= seed >> 17
-		seed ^= seed << 5
-		buf[i] = byte(seed)
-	}
-	return buf
-}()
+var trafficSpeedTestClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableCompression:    true,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("redirect too many times")
+		}
+		return validateSpeedTestURL(req.URL.String())
+	},
+}
 
 func SpeedTestHandler(c *gin.Context) {
-	chunks := 200
-	if raw := c.Query("size"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil {
-			chunks = n
-		}
+	target := strings.TrimSpace(c.Query("url"))
+	if target == "" {
+		target = defaultTrafficSpeedTestURL
 	}
-	if raw := c.Query("ckSize"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil {
-			chunks = n
-		}
-	}
-	if chunks < 1 {
-		chunks = 1
-	}
-	if chunks > 1024 {
-		chunks = 1024
+	if err := validateSpeedTestURL(target); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": err.Error()})
+		return
 	}
 
 	select {
@@ -55,30 +57,104 @@ func SpeedTestHandler(c *gin.Context) {
 		return
 	}
 
-	totalSize := int64(len(speedTestChunk)) * int64(chunks)
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Length", strconv.FormatInt(totalSize, 10))
-	c.Header("Content-Disposition", "attachment; filename=speedtest.bin")
-	// 显式声明不压缩，避免任何中间层对测速数据做内容编码。
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "测速地址不合法"})
+		return
+	}
+	req.Header.Set("User-Agent", "WebSSH-u60pro-SpeedTest/1.0")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Cache-Control", "no-cache")
+
+	resp, err := trafficSpeedTestClient.Do(req)
+	if err != nil {
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"code": 1, "msg": "测速地址请求失败: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"code": 1, "msg": fmt.Sprintf("测速地址返回 HTTP %d", resp.StatusCode)})
+		return
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	c.Header("Content-Type", contentType)
+	if resp.ContentLength > 0 {
+		c.Header("Content-Length", fmt.Sprintf("%d", resp.ContentLength))
+	}
+	c.Header("Content-Disposition", "attachment; filename=traffic-speedtest.bin")
 	c.Header("Content-Encoding", "identity")
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
 	c.Header("Pragma", "no-cache")
 	c.Writer.WriteHeaderNow()
 
-	w := c.Writer
-	for i := 0; i < chunks; i++ {
+	buf := make([]byte, 256*1024)
+	for {
 		select {
 		case <-c.Request.Context().Done():
 			return
 		default:
 		}
-		if _, err := w.Write(speedTestChunk); err != nil {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+		if readErr != nil {
+			if readErr != io.EOF && !isContextCanceled(c.Request.Context()) {
+				return
+			}
 			return
 		}
-		// 1MB 大块写入会直接落到底层连接，无需每块都 Flush（每块 Flush 反而增加开销）。
-		// 这里仅周期性 Flush，既保证数据持续下行（前端进度/速度实时刷新），又避免频繁系统调用。
-		if (i+1)%16 == 0 {
-			w.Flush()
+	}
+}
+
+func validateSpeedTestURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("测速地址不合法")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("测速地址只支持 http/https")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("测速地址缺少主机名")
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		return fmt.Errorf("测速地址解析失败")
+	}
+	for _, ip := range ips {
+		if isBlockedSpeedTestIP(ip) {
+			return fmt.Errorf("测速地址不能指向本机或内网地址")
 		}
 	}
+	return nil
+}
+
+func isBlockedSpeedTestIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsUnspecified() ||
+		ip.IsLoopback() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsPrivate() ||
+		ip.IsMulticast()
+}
+
+func isContextCanceled(ctx context.Context) bool {
+	return ctx.Err() == context.Canceled || ctx.Err() == context.DeadlineExceeded
 }
