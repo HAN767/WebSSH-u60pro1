@@ -1946,7 +1946,7 @@ const SESSION_ID = '00000000000000000000000000000000'
 
 // 网络制式选择（5G/4G、5G SA、5G NSA、4G）
 const netSelectOptions = [
-  { value: 'WL_AND_5G',  label: 'Auto' },
+  { value: 'WL_AND_5G',  label: '5G/4G/3G' },
   { value: 'Only_5G',    label: '5G SA' },
   { value: 'LTE_AND_5G', label: '5G NSA' },
   { value: 'WCDMA_AND_LTE', label: '4G/3G' },
