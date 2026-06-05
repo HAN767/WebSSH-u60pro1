@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,8 +16,12 @@ import (
 
 const defaultTrafficSpeedTestURL = "https://autopatchcn.yuanshen.com/client_app/download/pc_zip/20211117173857_8JkfDHNPmqKi67qR/YuanShen_2.3.0.zip"
 
-// 允许的最大并发测速流。前端会发起多条并行连接以打满链路，留出余量避免 429。
-var speedTestLimiter = make(chan struct{}, 16)
+const (
+	speedTestMaxConcurrent = 8
+	speedTestCopyBufSize   = 512 * 1024
+)
+
+var speedTestLimiter = make(chan struct{}, speedTestMaxConcurrent)
 
 var trafficSpeedTestClient = &http.Client{
 	Transport: &http.Transport{
@@ -33,7 +38,7 @@ var trafficSpeedTestClient = &http.Client{
 	},
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
-			return fmt.Errorf("redirect too many times")
+			return errors.New("redirect too many times")
 		}
 		return validateSpeedTestURL(req.URL.String())
 	},
@@ -77,7 +82,7 @@ func SpeedTestHandler(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		c.JSON(http.StatusBadGateway, gin.H{"code": 1, "msg": fmt.Sprintf("测速地址返回 HTTP %d", resp.StatusCode)})
 		return
 	}
@@ -96,48 +101,31 @@ func SpeedTestHandler(c *gin.Context) {
 	c.Header("Pragma", "no-cache")
 	c.Writer.WriteHeaderNow()
 
-	buf := make([]byte, 256*1024)
-	for {
-		select {
-		case <-c.Request.Context().Done():
-			return
-		default:
-		}
-		n, readErr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
-				return
-			}
-			c.Writer.Flush()
-		}
-		if readErr != nil {
-			if readErr != io.EOF && !isContextCanceled(c.Request.Context()) {
-				return
-			}
-			return
-		}
+	buf := make([]byte, speedTestCopyBufSize)
+	if _, err := io.CopyBuffer(c.Writer, resp.Body, buf); err != nil && !isContextCanceled(c.Request.Context()) {
+		return
 	}
 }
 
 func validateSpeedTestURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("测速地址不合法")
+		return errors.New("测速地址不合法")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("测速地址只支持 http/https")
+		return errors.New("测速地址只支持 http/https")
 	}
 	host := u.Hostname()
 	if host == "" {
-		return fmt.Errorf("测速地址缺少主机名")
+		return errors.New("测速地址缺少主机名")
 	}
 	ips, err := net.LookupIP(host)
 	if err != nil || len(ips) == 0 {
-		return fmt.Errorf("测速地址解析失败")
+		return errors.New("测速地址解析失败")
 	}
 	for _, ip := range ips {
 		if isBlockedSpeedTestIP(ip) {
-			return fmt.Errorf("测速地址不能指向本机或内网地址")
+			return errors.New("测速地址不能指向本机或内网地址")
 		}
 	}
 	return nil

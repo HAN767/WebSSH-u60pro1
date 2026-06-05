@@ -1479,7 +1479,7 @@
         <div>
           <div class="settings-section-title">测速地址
             <el-tooltip
-                content="默认为原神下载源 : )"
+                content="通过设备后端代理下载测速源，避免浏览器跨域限制。默认原神 PC 包下载源；自定义请填写 http/https 直链。"
                 placement="top">
                 <span class="settings-help-icon" size="small" style="margin-left: 4px;">!</span>
               </el-tooltip>
@@ -1504,7 +1504,7 @@
           <el-input-number
             v-model="localSpeedTest.threads"
             :min="1"
-            :max="16"
+            :max="8"
             :step="1"
             :disabled="localSpeedTest.running"
             controls-position="right" />
@@ -2105,6 +2105,7 @@ function clearSpeedSampleTimer() {
     localSpeedTestSampleTimer = null;
   }
 }
+// 默认测速源：原神 PC 包下载直链；由后端代理下载以绕开浏览器 CORS。
 const TRAFFIC_SPEEDTEST_DEFAULT_URL = 'https://autopatchcn.yuanshen.com/client_app/download/pc_zip/20211117173857_8JkfDHNPmqKi67qR/YuanShen_2.3.0.zip';
 const TRAFFIC_SPEEDTEST_URL_STORAGE_KEY = 'trafficSpeedTestUrl';
 const TRAFFIC_SPEEDTEST_THREADS_STORAGE_KEY = 'trafficSpeedTestThreads';
@@ -2192,8 +2193,8 @@ function openLocalSpeedTestDialog() {
 
 function normalizeSpeedTestThreads(value: unknown) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return 4;
-  return Math.max(1, Math.min(16, Math.round(n)));
+  if (!Number.isFinite(n)) return 5;
+  return Math.max(1, Math.min(8, Math.round(n)));
 }
 
 function formatSpeedMbps(bytesPerSecond: number) {
