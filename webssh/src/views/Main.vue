@@ -1492,7 +1492,8 @@
             class="local-speedtest-url"
             :disabled="localSpeedTest.running"
             placeholder="https://..."
-            clearable />
+            clearable
+            @blur="fillDefaultUrlIfEmpty" />
           
         </div>
       </div>
@@ -2239,9 +2240,17 @@ function stopLocalSpeedTest(message: unknown = '测速已停止') {
 // 预热时长（毫秒）：忽略 TCP 慢启动爬坡阶段，平均速度只统计进入稳态后的数据，提升准确度。
 const SPEEDTEST_GRACE_MS = 800;
 
+// 测速链接为空时回填默认链接（输入框失焦、或开始测速时触发）
+function fillDefaultUrlIfEmpty() {
+  if (!String(localSpeedTest.url || '').trim()) {
+    localSpeedTest.url = TRAFFIC_SPEEDTEST_DEFAULT_URL;
+  }
+}
+
 async function startLocalSpeedTest() {
   if (localSpeedTest.running) return;
-  const testUrl = String(localSpeedTest.url || '').trim();
+  let testUrl = String(localSpeedTest.url || '').trim();
+  if (!testUrl) testUrl = TRAFFIC_SPEEDTEST_DEFAULT_URL;   // 链接为空则回退默认链接
   if (!/^https?:\/\//i.test(testUrl)) {
     ElMessage.error('请输入 http/https 测速地址');
     return;
