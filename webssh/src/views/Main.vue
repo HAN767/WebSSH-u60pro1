@@ -1587,7 +1587,7 @@
             <section class="system-tool-section">
               <div class="system-tool-section-title">Bark</div>
               <el-switch v-model="smsForward.barkEnabled" active-text="启用" inactive-text="关闭" />
-              <el-input v-model="smsForward.barkUrl" placeholder="https://api.day.app/你的Key" clearable />
+              <el-input v-model="smsForward.barkUrl" placeholder="https://api.day.app/你的Key?icon=https://..." clearable />
             </section>
             <section class="system-tool-section">
               <div class="system-tool-section-title">TG Bot</div>
@@ -1598,14 +1598,30 @@
           </div>
           <div class="system-tool-actions">
             <el-button size="small" :loading="smsForward.loading" @click="loadSmsMessages">刷新短信</el-button>
+            <el-button size="small" :loading="smsForward.configSaving" @click="saveSmsForwardConfig">保存配置</el-button>
             <el-button size="small" type="primary" :loading="smsForward.forwarding" @click="forwardLatestSms">发送最新一条</el-button>
-            <el-button
-              size="small"
-              :type="smsForward.running ? 'danger' : 'success'"
-              :loading="smsForward.forwarding"
-              @click="toggleSmsForward">
-              {{ smsForward.running ? '停止监听' : '监听新短信' }}
-            </el-button>
+          </div>
+          <div class="sms-forward-switches">
+            <div class="sms-forward-switch-row">
+              <span class="mh-info-label">后台监听</span>
+              <el-switch
+                v-model="smsForward.running"
+                :loading="smsForward.controlChanging"
+                active-text="已开启"
+                inactive-text="已关闭"
+                @change="(v: boolean) => setSmsForwardRunning(v)" />
+              <span class="mh-meta">后端每 {{ smsForward.pollInterval }} 秒轮询新短信</span>
+            </div>
+            <div class="sms-forward-switch-row">
+              <span class="mh-info-label">开机自启</span>
+              <el-switch
+                v-model="smsForward.autostartEnabled"
+                :loading="smsForward.autostartChanging"
+                active-text="已开启"
+                inactive-text="已关闭"
+                @change="(v: boolean) => setSmsForwardAutostart(v)" />
+              <span class="mh-meta">webssh 启动时自动开启短信监听</span>
+            </div>
           </div>
           <div v-if="smsForward.status" class="local-speedtest-message">{{ smsForward.status }}</div>
           <div class="sms-message-list">
@@ -2210,28 +2226,26 @@ const localSpeedTestSummary = computed(() => {
   return localSpeedTest.avgSpeed !== '-- Mbps' ? localSpeedTest.avgSpeed : '未配置';
 });
 
-const SMS_FORWARD_STORAGE_KEY = 'systemToolsSmsForward';
-const savedSmsForward = (() => {
-  try {
-    return JSON.parse(localStorage.getItem(SMS_FORWARD_STORAGE_KEY) || '{}');
-  } catch {
-    return {};
-  }
-})();
 const smsForward = reactive({
-  barkEnabled: !!savedSmsForward.barkEnabled,
-  barkUrl: savedSmsForward.barkUrl || '',
-  tgEnabled: !!savedSmsForward.tgEnabled,
-  tgBotToken: savedSmsForward.tgBotToken || '',
-  tgChatId: savedSmsForward.tgChatId || '',
-  lastId: Number(savedSmsForward.lastId || 0),
+  barkEnabled: false,
+  barkUrl: '',
+  tgEnabled: false,
+  tgBotToken: '',
+  tgChatId: '',
+  lastId: 0,
   running: false,
+  autostartEnabled: false,
+  pollInterval: 3,
   loading: false,
   forwarding: false,
+  configSaving: false,
+  controlChanging: false,
+  autostartChanging: false,
+  sentCount: 0,
+  lastError: '',
   status: '',
 });
 const smsMessages = ref<SmsMessage[]>([]);
-let smsForwardTimer: number | null = null;
 
 const rcLocal = reactive({
   loading: false,
@@ -2309,23 +2323,15 @@ function fmtTime(v: number): string {
 function openSystemToolsDialog(tab: SystemToolsTab = 'speedtest') {
   systemToolsActiveTab.value = tab;
   systemToolsDialogVisible.value = true;
+  if (tab === 'sms') {
+    loadSmsForwardStatus();
+  }
   if (tab === 'sms' && smsMessages.value.length === 0) {
     loadSmsMessages();
   }
   if (tab === 'rcLocal' && !rcLocal.loaded) {
     loadRcLocal();
   }
-}
-
-function saveSmsForwardSettings() {
-  localStorage.setItem(SMS_FORWARD_STORAGE_KEY, JSON.stringify({
-    barkEnabled: smsForward.barkEnabled,
-    barkUrl: smsForward.barkUrl,
-    tgEnabled: smsForward.tgEnabled,
-    tgBotToken: smsForward.tgBotToken,
-    tgChatId: smsForward.tgChatId,
-    lastId: smsForward.lastId,
-  }));
 }
 
 async function loadSmsMessages() {
@@ -2337,11 +2343,6 @@ async function loadSmsMessages() {
       return;
     }
     smsMessages.value = res.data.data?.messages || [];
-    const maxId = smsMessages.value.reduce((max, msg) => Math.max(max, Number(msg.id || 0)), 0);
-    if (!smsForward.running && smsForward.lastId === 0) {
-      smsForward.lastId = maxId;
-      saveSmsForwardSettings();
-    }
   } catch (e: any) {
     ElMessage.error('读取短信失败: ' + (e?.message ?? e));
   } finally {
@@ -2365,11 +2366,67 @@ function validateSmsForwardTarget() {
   return true;
 }
 
+async function loadSmsForwardStatus() {
+  try {
+    const res = await axios.get('/api/system/sms-forward/status');
+    if (res.data.code !== 0) {
+      smsForward.status = res.data.msg || '读取短信转发状态失败';
+      return;
+    }
+    const data = res.data.data || {};
+    const config = data.config || {};
+    smsForward.barkEnabled = !!config.bark_enabled;
+    smsForward.barkUrl = config.bark_url || '';
+    smsForward.tgEnabled = !!config.tg_enabled;
+    smsForward.tgBotToken = config.tg_bot_token || '';
+    smsForward.tgChatId = config.tg_chat_id || '';
+    smsForward.lastId = Number(data.last_id || config.last_id || 0);
+    smsForward.running = !!data.running;
+    smsForward.autostartEnabled = !!data.autostart_enabled;
+    smsForward.pollInterval = Number(data.poll_interval || 3);
+    smsForward.sentCount = Number(data.sent_count || 0);
+    smsForward.lastError = data.last_error || '';
+    smsForward.status = smsForward.lastError
+      ? `后台监听异常：${smsForward.lastError}`
+      : (smsForward.running ? `后台监听中，已推送 ${smsForward.sentCount} 次` : '后台监听未开启');
+  } catch (e: any) {
+    smsForward.status = '读取短信转发状态失败: ' + (e?.message ?? e);
+  }
+}
+
+async function saveSmsForwardConfig(showMessage = true) {
+  if (!validateSmsForwardTarget()) return false;
+  smsForward.configSaving = true;
+  try {
+    const res = await axios.put('/api/system/sms-forward/config', {
+      bark_enabled: smsForward.barkEnabled,
+      bark_url: smsForward.barkUrl,
+      tg_enabled: smsForward.tgEnabled,
+      tg_bot_token: smsForward.tgBotToken,
+      tg_chat_id: smsForward.tgChatId,
+      last_id: smsForward.lastId,
+    });
+    if (res.data.code !== 0) {
+      smsForward.status = res.data.msg || '保存短信转发配置失败';
+      ElMessage.error(smsForward.status);
+      return false;
+    }
+    if (showMessage) ElMessage.success('短信转发配置已保存');
+    await loadSmsForwardStatus();
+    return true;
+  } catch (e: any) {
+    smsForward.status = '保存短信转发配置失败: ' + (e?.message ?? e);
+    ElMessage.error(smsForward.status);
+    return false;
+  } finally {
+    smsForward.configSaving = false;
+  }
+}
+
 async function forwardSms(onlyLatest: boolean) {
   if (!validateSmsForwardTarget()) return;
   smsForward.forwarding = true;
   smsForward.status = onlyLatest ? '正在发送最新短信...' : '正在检查新短信...';
-  saveSmsForwardSettings();
   try {
     const res = await axios.post('/api/system/sms/forward', {
       bark_enabled: smsForward.barkEnabled,
@@ -2386,7 +2443,6 @@ async function forwardSms(onlyLatest: boolean) {
     }
     if (typeof data.latest_id === 'number') {
       smsForward.lastId = data.latest_id;
-      saveSmsForwardSettings();
     }
     if (res.data.code !== 0) {
       smsForward.status = res.data.msg || '短信转发失败';
@@ -2406,31 +2462,62 @@ function forwardLatestSms() {
   return forwardSms(true);
 }
 
-function startSmsForwardWatch() {
-  if (!validateSmsForwardTarget()) return;
-  smsForward.running = true;
-  smsForward.status = '正在监听新短信...';
-  saveSmsForwardSettings();
-  if (smsForwardTimer != null) clearInterval(smsForwardTimer);
-  smsForwardTimer = window.setInterval(() => {
-    if (!smsForward.forwarding) forwardSms(false);
-  }, 15000);
-  forwardSms(false);
-}
-
-function stopSmsForwardWatch() {
-  smsForward.running = false;
-  smsForward.status = '已停止监听';
-  if (smsForwardTimer != null) {
-    clearInterval(smsForwardTimer);
-    smsForwardTimer = null;
+async function setSmsForwardRunning(enabled: boolean) {
+  smsForward.controlChanging = true;
+  try {
+    if (enabled) {
+      const saved = await saveSmsForwardConfig(false);
+      if (!saved) {
+        smsForward.running = false;
+        return;
+      }
+    }
+    const res = await axios.post('/api/system/sms-forward/control', { action: enabled ? 'start' : 'stop' });
+    if (res.data.code !== 0) {
+      smsForward.running = !enabled;
+      smsForward.status = res.data.msg || '设置后台监听失败';
+      ElMessage.error(smsForward.status);
+      return;
+    }
+    smsForward.running = enabled;
+    ElMessage.success(enabled ? '已开启后台短信监听' : '已停止后台短信监听');
+    await loadSmsForwardStatus();
+  } catch (e: any) {
+    smsForward.running = !enabled;
+    smsForward.status = '设置后台监听失败: ' + (e?.message ?? e);
+    ElMessage.error(smsForward.status);
+  } finally {
+    smsForward.controlChanging = false;
   }
-  saveSmsForwardSettings();
 }
 
-function toggleSmsForward() {
-  if (smsForward.running) stopSmsForwardWatch();
-  else startSmsForwardWatch();
+async function setSmsForwardAutostart(enabled: boolean) {
+  smsForward.autostartChanging = true;
+  try {
+    if (enabled) {
+      const saved = await saveSmsForwardConfig(false);
+      if (!saved) {
+        smsForward.autostartEnabled = false;
+        return;
+      }
+    }
+    const res = await axios.post('/api/system/sms-forward/autostart', { enabled });
+    if (res.data.code !== 0) {
+      smsForward.autostartEnabled = !enabled;
+      smsForward.status = res.data.msg || '设置开机自启失败';
+      ElMessage.error(smsForward.status);
+      return;
+    }
+    smsForward.autostartEnabled = enabled;
+    ElMessage.success(enabled ? '已开启开机自启' : '已关闭开机自启');
+    await loadSmsForwardStatus();
+  } catch (e: any) {
+    smsForward.autostartEnabled = !enabled;
+    smsForward.status = '设置开机自启失败: ' + (e?.message ?? e);
+    ElMessage.error(smsForward.status);
+  } finally {
+    smsForward.autostartChanging = false;
+  }
 }
 
 async function loadRcLocal() {
@@ -4655,7 +4742,6 @@ onUnmounted(() => {
   stopAutoRefresh();
   stopMmAllPolls();
   stopLocalSpeedTest();
-  stopSmsForwardWatch();
   stopDeviceRfRefresh();
   if (mmGateClickTimer) {
     clearTimeout(mmGateClickTimer);
@@ -6661,6 +6747,21 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
+}
+.sms-forward-switches {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sms-forward-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
 }
 .system-tool-hint {
   margin-top: 6px;

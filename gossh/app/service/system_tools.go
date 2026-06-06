@@ -2,21 +2,30 @@ package service
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"gossh/app/utils"
 	"gossh/gin"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 )
 
 const rcLocalPath = "/etc/rc.local"
+const smsForwardDefaultDir = "/data/kano_plugins/sms_forward"
+const smsForwardConfigName = "config.json"
+const smsForwardAutostartMarker = ".autostart"
+const smsForwardPollInterval = 3 * time.Second
 
 type smsMessage struct {
 	ID       int    `json:"id"`
@@ -28,6 +37,27 @@ type smsMessage struct {
 	MemStore string `json:"mem_store"`
 }
 
+type smsForwardConfig struct {
+	BarkEnabled bool   `json:"bark_enabled"`
+	BarkURL     string `json:"bark_url"`
+	TgEnabled   bool   `json:"tg_enabled"`
+	TgBotToken  string `json:"tg_bot_token"`
+	TgChatID    string `json:"tg_chat_id"`
+	LastID      int    `json:"last_id"`
+}
+
+type smsForwardRuntimeStatus struct {
+	Running   bool   `json:"running"`
+	StartedAt string `json:"started_at"`
+	LastError string `json:"last_error"`
+	SentCount int    `json:"sent_count"`
+	LastID    int    `json:"last_id"`
+}
+
+var smsForwardMu sync.Mutex
+var smsForwardStop chan struct{}
+var smsForwardStatus smsForwardRuntimeStatus
+
 func SystemSmsListHandler(c *gin.Context) {
 	messages, err := loadSmsMessages()
 	if err != nil {
@@ -35,6 +65,87 @@ func SystemSmsListHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": gin.H{"messages": messages}})
+}
+
+func SystemSmsForwardStatusHandler(c *gin.Context) {
+	cfg, err := loadSmsForwardConfig()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": err.Error()})
+		return
+	}
+	status := getSmsForwardStatus()
+	status.LastID = cfg.LastID
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": gin.H{
+		"config":            cfg,
+		"running":           status.Running,
+		"started_at":        status.StartedAt,
+		"last_error":        status.LastError,
+		"sent_count":        status.SentCount,
+		"last_id":           cfg.LastID,
+		"autostart_enabled": getSmsForwardAutostartEnabled(),
+		"poll_interval":     int(smsForwardPollInterval.Seconds()),
+	}})
+}
+
+func SystemSmsForwardConfigHandler(c *gin.Context) {
+	var req smsForwardConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "参数错误: " + err.Error()})
+		return
+	}
+	current, _ := loadSmsForwardConfig()
+	if req.LastID == 0 {
+		req.LastID = current.LastID
+	}
+	if err := saveSmsForwardConfig(req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 2, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": req})
+}
+
+func SystemSmsForwardControlHandler(c *gin.Context) {
+	var req struct {
+		Action string `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "参数错误: " + err.Error()})
+		return
+	}
+	switch req.Action {
+	case "start":
+		if err := startSmsForwardWorker(false); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 2, "msg": err.Error()})
+			return
+		}
+	case "stop":
+		stopSmsForwardWorker()
+	case "restart":
+		stopSmsForwardWorker()
+		if err := startSmsForwardWorker(false); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 2, "msg": err.Error()})
+			return
+		}
+	default:
+		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "不支持的操作"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": getSmsForwardStatus()})
+}
+
+func SystemSmsForwardAutostartHandler(c *gin.Context) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "参数错误: " + err.Error()})
+		return
+	}
+	if err := setSmsForwardAutostartEnabled(req.Enabled); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 2, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": gin.H{"enabled": req.Enabled}})
 }
 
 func SystemSmsForwardHandler(c *gin.Context) {
@@ -108,6 +219,259 @@ func SystemSmsForwardHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": gin.H{"latest_id": latestID, "sent": sent, "messages": targets}})
 }
 
+func InitSmsForwardAutostart() {
+	if !getSmsForwardAutostartEnabled() {
+		return
+	}
+	go func() {
+		if err := startSmsForwardWorker(true); err != nil {
+			slog.Warn("sms forward autostart failed", "err", err)
+		}
+	}()
+}
+
+func startSmsForwardWorker(fromAutostart bool) error {
+	smsForwardMu.Lock()
+	if smsForwardStop != nil {
+		smsForwardMu.Unlock()
+		return nil
+	}
+	cfg, err := loadSmsForwardConfig()
+	if err != nil {
+		smsForwardMu.Unlock()
+		return err
+	}
+	if err := validateSmsForwardConfig(cfg); err != nil {
+		smsForwardMu.Unlock()
+		return err
+	}
+	stop := make(chan struct{})
+	smsForwardStop = stop
+	smsForwardStatus = smsForwardRuntimeStatus{
+		Running:   true,
+		StartedAt: time.Now().Format(time.RFC3339),
+		LastID:    cfg.LastID,
+	}
+	smsForwardMu.Unlock()
+
+	go runSmsForwardWorker(stop, fromAutostart)
+	return nil
+}
+
+func stopSmsForwardWorker() {
+	smsForwardMu.Lock()
+	if smsForwardStop != nil {
+		close(smsForwardStop)
+		smsForwardStop = nil
+	}
+	smsForwardStatus.Running = false
+	smsForwardMu.Unlock()
+}
+
+func runSmsForwardWorker(stop <-chan struct{}, fromAutostart bool) {
+	defer func() {
+		smsForwardMu.Lock()
+		if smsForwardStop == stop {
+			smsForwardStop = nil
+		}
+		smsForwardStatus.Running = false
+		smsForwardMu.Unlock()
+	}()
+
+	if fromAutostart {
+		time.Sleep(5 * time.Second)
+	}
+	ticker := time.NewTicker(smsForwardPollInterval)
+	defer ticker.Stop()
+
+	if err := smsForwardPollOnce(); err != nil {
+		setSmsForwardLastError(err.Error())
+	}
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			if err := smsForwardPollOnce(); err != nil {
+				setSmsForwardLastError(err.Error())
+			}
+		}
+	}
+}
+
+func smsForwardPollOnce() error {
+	cfg, err := loadSmsForwardConfig()
+	if err != nil {
+		return err
+	}
+	if err := validateSmsForwardConfig(cfg); err != nil {
+		return err
+	}
+	messages, err := loadSmsMessages()
+	if err != nil {
+		return err
+	}
+	latestID := cfg.LastID
+	for _, msg := range messages {
+		if msg.ID > latestID {
+			latestID = msg.ID
+		}
+	}
+	if cfg.LastID == 0 {
+		cfg.LastID = latestID
+		if err := saveSmsForwardConfig(cfg); err != nil {
+			return err
+		}
+		setSmsForwardLastID(cfg.LastID)
+		return nil
+	}
+
+	targets := make([]smsMessage, 0)
+	for _, msg := range messages {
+		if msg.ID > cfg.LastID {
+			targets = append(targets, msg)
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
+
+	sent := 0
+	var errs []string
+	for _, msg := range targets {
+		title := fmt.Sprintf("短信 %s", msg.Number)
+		text := fmt.Sprintf("来自: %s\n时间: %s\n%s", msg.Number, msg.Date, msg.Content)
+		if cfg.BarkEnabled {
+			if err := sendBark(cfg.BarkURL, title, text); err != nil {
+				errs = append(errs, "Bark: "+err.Error())
+			} else {
+				sent++
+			}
+		}
+		if cfg.TgEnabled {
+			if err := sendTelegram(cfg.TgBotToken, cfg.TgChatID, text); err != nil {
+				errs = append(errs, "TG: "+err.Error())
+			} else {
+				sent++
+			}
+		}
+		if msg.ID > cfg.LastID {
+			cfg.LastID = msg.ID
+		}
+	}
+	if cfg.LastID != latestID {
+		cfg.LastID = latestID
+	}
+	if len(targets) > 0 {
+		if err := saveSmsForwardConfig(cfg); err != nil {
+			return err
+		}
+	}
+	setSmsForwardSent(sent, cfg.LastID)
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	setSmsForwardLastError("")
+	return nil
+}
+
+func smsForwardDir() string {
+	return smsForwardDefaultDir
+}
+
+func smsForwardConfigPath() string {
+	return filepath.Join(smsForwardDir(), smsForwardConfigName)
+}
+
+func loadSmsForwardConfig() (smsForwardConfig, error) {
+	var cfg smsForwardConfig
+	data, err := os.ReadFile(smsForwardConfigPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return cfg, fmt.Errorf("读取短信转发配置失败: %w", err)
+	}
+	if len(data) == 0 {
+		return cfg, nil
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("解析短信转发配置失败: %w", err)
+	}
+	return cfg, nil
+}
+
+func saveSmsForwardConfig(cfg smsForwardConfig) error {
+	if err := os.MkdirAll(smsForwardDir(), 0755); err != nil {
+		return fmt.Errorf("创建短信转发目录失败: %w", err)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化短信转发配置失败: %w", err)
+	}
+	if err := os.WriteFile(smsForwardConfigPath(), data, 0600); err != nil {
+		return fmt.Errorf("保存短信转发配置失败: %w", err)
+	}
+	return nil
+}
+
+func validateSmsForwardConfig(cfg smsForwardConfig) error {
+	if !cfg.BarkEnabled && !cfg.TgEnabled {
+		return errors.New("请至少启用 Bark 或 TG Bot")
+	}
+	if cfg.BarkEnabled && strings.TrimSpace(cfg.BarkURL) == "" {
+		return errors.New("请填写 Bark 地址")
+	}
+	if cfg.TgEnabled && (strings.TrimSpace(cfg.TgBotToken) == "" || strings.TrimSpace(cfg.TgChatID) == "") {
+		return errors.New("请填写 TG Bot Token 和 Chat ID")
+	}
+	return nil
+}
+
+func getSmsForwardAutostartEnabled() bool {
+	_, err := os.Stat(filepath.Join(smsForwardDir(), smsForwardAutostartMarker))
+	return err == nil
+}
+
+func setSmsForwardAutostartEnabled(enabled bool) error {
+	if err := os.MkdirAll(smsForwardDir(), 0755); err != nil {
+		return fmt.Errorf("创建短信转发目录失败: %w", err)
+	}
+	marker := filepath.Join(smsForwardDir(), smsForwardAutostartMarker)
+	if enabled {
+		return os.WriteFile(marker, []byte(""), 0644)
+	}
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func getSmsForwardStatus() smsForwardRuntimeStatus {
+	smsForwardMu.Lock()
+	defer smsForwardMu.Unlock()
+	status := smsForwardStatus
+	status.Running = smsForwardStop != nil
+	return status
+}
+
+func setSmsForwardLastError(msg string) {
+	smsForwardMu.Lock()
+	defer smsForwardMu.Unlock()
+	smsForwardStatus.LastError = msg
+}
+
+func setSmsForwardLastID(lastID int) {
+	smsForwardMu.Lock()
+	defer smsForwardMu.Unlock()
+	smsForwardStatus.LastID = lastID
+}
+
+func setSmsForwardSent(sent int, lastID int) {
+	smsForwardMu.Lock()
+	defer smsForwardMu.Unlock()
+	smsForwardStatus.SentCount += sent
+	smsForwardStatus.LastID = lastID
+}
+
 func SystemRcLocalGetHandler(c *gin.Context) {
 	content, err := os.ReadFile(rcLocalPath)
 	if err != nil {
@@ -162,7 +526,7 @@ func loadSmsMessages() ([]smsMessage, error) {
 		messages = append(messages, smsMessage{
 			ID:       intValue(obj["id"]),
 			Number:   stringValue(obj["number"]),
-			Date:     stringValue(obj["date"]),
+			Date:     formatSmsDate(stringValue(obj["date"])),
 			Content:  decodeUtf16BEHex(rawHex),
 			RawHex:   rawHex,
 			Tag:      stringValue(obj["tag"]),
@@ -201,8 +565,42 @@ func sendBark(rawURL string, title string, body string) error {
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		return fmt.Errorf("Bark 地址不合法")
 	}
-	base.Path = strings.TrimRight(base.Path, "/") + "/" + url.PathEscape(title) + "/" + url.PathEscape(body)
-	return notifyGet(base.String())
+
+	deviceKey, endpoint := barkDeviceKeyAndEndpoint(base)
+	if deviceKey == "" {
+		return fmt.Errorf("Bark 地址缺少 device key")
+	}
+	payloadData := map[string]string{
+		"device_key": deviceKey,
+		"title":      title,
+		"body":       body,
+	}
+	if icon := strings.TrimSpace(base.Query().Get("icon")); icon != "" {
+		payloadData["icon"] = icon
+	}
+	payload, err := json.Marshal(payloadData)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	return notifyRequest(req)
+}
+
+func barkDeviceKeyAndEndpoint(base *url.URL) (string, string) {
+	parts := strings.Split(strings.Trim(base.Path, "/"), "/")
+	deviceKey := ""
+	if len(parts) > 0 && parts[0] != "" && parts[0] != "push" {
+		deviceKey = parts[0]
+	}
+	endpoint := *base
+	endpoint.Path = "/push"
+	endpoint.RawQuery = ""
+	endpoint.Fragment = ""
+	return deviceKey, endpoint.String()
 }
 
 func sendTelegram(token string, chatID string, text string) error {
@@ -220,14 +618,6 @@ func sendTelegram(token string, chatID string, text string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return notifyRequest(req)
-}
-
-func notifyGet(target string) error {
-	req, err := http.NewRequest(http.MethodGet, target, nil)
-	if err != nil {
-		return err
-	}
 	return notifyRequest(req)
 }
 
@@ -256,6 +646,26 @@ func stringValue(v interface{}) string {
 	default:
 		return fmt.Sprint(t)
 	}
+}
+
+func formatSmsDate(value string) string {
+	parts := strings.Split(value, ",")
+	if len(parts) < 6 {
+		return value
+	}
+	nums := make([]int, 6)
+	for i := 0; i < 6; i++ {
+		n, err := strconv.Atoi(strings.TrimSpace(parts[i]))
+		if err != nil {
+			return value
+		}
+		nums[i] = n
+	}
+	year := nums[0]
+	if year < 100 {
+		year += 2000
+	}
+	return fmt.Sprintf("%04d 年 %02d 月 %02d 日 %02d:%02d:%02d", year, nums[1], nums[2], nums[3], nums[4], nums[5])
 }
 
 func intValue(v interface{}) int {

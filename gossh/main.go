@@ -842,6 +842,7 @@ func initApplication() {
 	service.InitSessionClean()
 	service.InitSshServer()
 	service.InitMihomoAutostart()
+	service.InitSmsForwardAutostart()
 	service.InitWifiSettingsAutostart()
 	fmt.Printf("WebBaseDir:[%s]\n", config.DefaultConfig.WebBaseDir)
 }
@@ -905,6 +906,10 @@ func main() {
 		auth.GET("/api/speedtest", service.SpeedTestHandler)
 		auth.GET("/api/system/sms", service.SystemSmsListHandler)
 		auth.POST("/api/system/sms/forward", service.SystemSmsForwardHandler)
+		auth.GET("/api/system/sms-forward/status", service.SystemSmsForwardStatusHandler)
+		auth.PUT("/api/system/sms-forward/config", service.SystemSmsForwardConfigHandler)
+		auth.POST("/api/system/sms-forward/control", service.SystemSmsForwardControlHandler)
+		auth.POST("/api/system/sms-forward/autostart", service.SystemSmsForwardAutostartHandler)
 		auth.GET("/api/system/rc-local", service.SystemRcLocalGetHandler)
 		auth.PUT("/api/system/rc-local", service.SystemRcLocalSaveHandler)
 	}
