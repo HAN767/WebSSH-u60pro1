@@ -1602,27 +1602,26 @@
             <el-button size="small" type="primary" :loading="smsForward.forwarding" @click="forwardLatestSms">发送最新一条</el-button>
           </div>
           <div class="sms-forward-switches">
-            <div class="sms-forward-switch-row">
-              <span class="mh-info-label">后台监听</span>
+            <div class="local-speedtest-option">
+              <span>后台监听</span>
               <el-switch
-                v-model="smsForward.running"
+                :model-value="smsForward.running"
                 :loading="smsForward.controlChanging"
-                active-text="已开启"
-                inactive-text="已关闭"
-                @change="(v: boolean) => setSmsForwardRunning(v)" />
-              <span class="mh-meta">后端每 {{ smsForward.pollInterval }} 秒轮询新短信</span>
+                active-text="开"
+                inactive-text="关"
+                @change="(val: string | number | boolean) => setSmsForwardRunning(Boolean(val))" />
             </div>
-            <div class="sms-forward-switch-row">
-              <span class="mh-info-label">开机自启</span>
+            <div class="local-speedtest-option">
+              <span>开机自启</span>
               <el-switch
-                v-model="smsForward.autostartEnabled"
+                :model-value="smsForward.autostartEnabled"
                 :loading="smsForward.autostartChanging"
-                active-text="已开启"
-                inactive-text="已关闭"
-                @change="(v: boolean) => setSmsForwardAutostart(v)" />
-              <span class="mh-meta">webssh 启动时自动开启短信监听</span>
+                active-text="开"
+                inactive-text="关"
+                @change="(val: string | number | boolean) => setSmsForwardAutostart(Boolean(val))" />
             </div>
           </div>
+          <div class="sms-forward-hint">后台每 {{ smsForward.pollInterval }} 秒轮询新短信；开机自启会在 webssh 启动时自动开启监听。</div>
           <div v-if="smsForward.status" class="local-speedtest-message">{{ smsForward.status }}</div>
           <div class="sms-message-list">
             <div v-for="msg in smsMessages" :key="msg.id" class="sms-message-item">
@@ -4721,12 +4720,16 @@ watch(deviceDialogVisible, (open) => {
 
 watch(systemToolsActiveTab, (tab) => {
   if (!systemToolsDialogVisible.value) return;
-  if (tab === 'sms' && smsMessages.value.length === 0) loadSmsMessages();
+  if (tab === 'sms') {
+    loadSmsForwardStatus();
+    if (smsMessages.value.length === 0) loadSmsMessages();
+  }
   if (tab === 'rcLocal' && !rcLocal.loaded) loadRcLocal();
 });
 
 onMounted(() => {
   initMmEntryState();
+  loadSmsForwardStatus();
   fetchAllData();
   loadDeviceSettings();
   if (autoRefresh.value) {
@@ -6748,20 +6751,21 @@ onUnmounted(() => {
   gap: 10px;
   flex-wrap: wrap;
 }
+/* 短信操作按钮：等宽填充，避免 loading 图标导致按钮忽大忽小 */
+.system-tool-actions .el-button {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 0 !important;
+}
 .sms-forward-switches {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-.sms-forward-switch-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.08);
+.sms-forward-hint {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .system-tool-hint {
   margin-top: 6px;
@@ -6812,6 +6816,9 @@ onUnmounted(() => {
 
 @media (max-width: 560px) {
   .sms-forward-grid {
+    grid-template-columns: 1fr;
+  }
+  .sms-forward-switches {
     grid-template-columns: 1fr;
   }
   .local-speedtest-header {
