@@ -903,6 +903,10 @@ func main() {
 		auth.POST("/api/wifi/settings", service.WifiSettingsSetHandler)
 		auth.POST("/api/net/ambr/get", service.NetAmbrGetHandler)
 		auth.GET("/api/speedtest", service.SpeedTestHandler)
+		auth.GET("/api/system/sms", service.SystemSmsListHandler)
+		auth.POST("/api/system/sms/forward", service.SystemSmsForwardHandler)
+		auth.GET("/api/system/rc-local", service.SystemRcLocalGetHandler)
+		auth.PUT("/api/system/rc-local", service.SystemRcLocalSaveHandler)
 	}
 
 	{ // SSH 连接配置

@@ -80,13 +80,13 @@
 
           <button
             class="quick-action-button speedtest-action-button"
-            :class="{ active: localSpeedTest.running }"
-            @click="openLocalSpeedTestDialog"
+            :class="{ active: localSpeedTest.running || smsForward.running }"
+            @click="() => openSystemToolsDialog()"
           >
-            <span class="quick-action-icon">SPD</span>
+            <span class="quick-action-icon">SYS</span>
             <span class="quick-action-copy">
-              <span class="quick-action-title">流量测速</span>
-              <span class="quick-action-subtitle">{{ localSpeedTest.running ? '测速中...' : localSpeedTestSummary }}</span>
+              <span class="quick-action-title">系统工具</span>
+              <span class="quick-action-subtitle">{{ systemToolsSummary }}</span>
             </span>
           </button>
 
@@ -1467,14 +1467,16 @@
     </template>
   </el-dialog>
 
-  <!-- ───────── 流量测速弹窗 ───────── -->
+  <!-- ───────── 系统工具弹窗 ───────── -->
   <el-dialog
-    v-model="localSpeedTestDialogVisible"
-    title="流量测速"
-    width="min(640px, 96vw)"
+    v-model="systemToolsDialogVisible"
+    title="系统工具"
+    width="min(760px, 96vw)"
     :close-on-click-modal="!localSpeedTest.running"
     class="wireless-dialog">
-    <div class="local-speedtest-panel">
+    <el-tabs v-model="systemToolsActiveTab" class="system-tools-tabs">
+      <el-tab-pane label="流量测速" name="speedtest">
+        <div class="local-speedtest-panel">
       <div class="local-speedtest-header">
         <div>
           <div class="settings-section-title">测速地址
@@ -1575,11 +1577,78 @@
       </div>
 
       <div v-if="localSpeedTest.message" class="local-speedtest-message">{{ localSpeedTest.message }}</div>
-    </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="短信转发" name="sms">
+        <div class="system-tool-panel">
+          <div class="settings-section-title">短信转发</div>
+          <div class="sms-forward-grid">
+            <section class="system-tool-section">
+              <div class="system-tool-section-title">Bark</div>
+              <el-switch v-model="smsForward.barkEnabled" active-text="启用" inactive-text="关闭" />
+              <el-input v-model="smsForward.barkUrl" placeholder="https://api.day.app/你的Key" clearable />
+            </section>
+            <section class="system-tool-section">
+              <div class="system-tool-section-title">TG Bot</div>
+              <el-switch v-model="smsForward.tgEnabled" active-text="启用" inactive-text="关闭" />
+              <el-input v-model="smsForward.tgBotToken" placeholder="Bot Token" clearable show-password />
+              <el-input v-model="smsForward.tgChatId" placeholder="Chat ID" clearable />
+            </section>
+          </div>
+          <div class="system-tool-actions">
+            <el-button size="small" :loading="smsForward.loading" @click="loadSmsMessages">刷新短信</el-button>
+            <el-button size="small" type="primary" :loading="smsForward.forwarding" @click="forwardLatestSms">发送最新一条</el-button>
+            <el-button
+              size="small"
+              :type="smsForward.running ? 'danger' : 'success'"
+              :loading="smsForward.forwarding"
+              @click="toggleSmsForward">
+              {{ smsForward.running ? '停止监听' : '监听新短信' }}
+            </el-button>
+          </div>
+          <div v-if="smsForward.status" class="local-speedtest-message">{{ smsForward.status }}</div>
+          <div class="sms-message-list">
+            <div v-for="msg in smsMessages" :key="msg.id" class="sms-message-item">
+              <div class="sms-message-meta">
+                <span>#{{ msg.id }}</span>
+                <strong>{{ msg.number || '未知号码' }}</strong>
+                <span>{{ msg.date }}</span>
+              </div>
+              <div class="sms-message-content">{{ msg.content }}</div>
+            </div>
+            <div v-if="!smsForward.loading && smsMessages.length === 0" class="system-tool-empty">暂无短信</div>
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="rc.local" name="rcLocal">
+        <div class="system-tool-panel">
+          <div class="system-tool-header">
+            <div>
+              <div class="settings-section-title">/etc/rc.local</div>
+              <div class="system-tool-hint">保存后会写入设备本机文件，并设置为可执行权限。</div>
+            </div>
+            <el-button size="small" :loading="rcLocal.loading" @click="loadRcLocal">刷新</el-button>
+          </div>
+          <el-input
+            v-model="rcLocal.content"
+            type="textarea"
+            :autosize="{ minRows: 14, maxRows: 22 }"
+            spellcheck="false"
+            class="rc-local-editor"
+            placeholder="#!/bin/sh" />
+          <div v-if="rcLocal.status" class="local-speedtest-message">{{ rcLocal.status }}</div>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
     <template #footer>
-      <el-button @click="localSpeedTestDialogVisible = false" :disabled="localSpeedTest.running">关闭</el-button>
-      <el-button v-if="localSpeedTest.running" type="danger" @click="() => stopLocalSpeedTest()">停止</el-button>
-      <el-button v-else type="primary" @click="startLocalSpeedTest">开始测速</el-button>
+      <el-button @click="systemToolsDialogVisible = false" :disabled="localSpeedTest.running">关闭</el-button>
+      <template v-if="systemToolsActiveTab === 'speedtest'">
+        <el-button v-if="localSpeedTest.running" type="danger" @click="() => stopLocalSpeedTest()">停止</el-button>
+        <el-button v-else type="primary" @click="startLocalSpeedTest">开始测速</el-button>
+      </template>
+      <el-button v-else-if="systemToolsActiveTab === 'rcLocal'" type="primary" :loading="rcLocal.saving" @click="saveRcLocal">保存</el-button>
     </template>
   </el-dialog>
 
@@ -2095,7 +2164,20 @@ const wifiSettingsSummary = computed(() => {
   return wifiSettingsSaving.value ? '应用中...' : `${wifiInfo.value.wifiStatus24 ? '2.4G开' : '2.4G关'} / ${wifiInfo.value.wifiStatus5 ? '5G开' : '5G关'}`;
 });
 
-const localSpeedTestDialogVisible = ref(false);
+type SystemToolsTab = 'speedtest' | 'sms' | 'rcLocal';
+
+interface SmsMessage {
+  id: number;
+  number: string;
+  date: string;
+  content: string;
+  raw_hex: string;
+  tag: string;
+  mem_store: string;
+}
+
+const systemToolsDialogVisible = ref(false);
+const systemToolsActiveTab = ref<SystemToolsTab>('speedtest');
 let localSpeedTestWorkers: Worker[] = [];
 // 当前速度按固定节拍采样的定时器（见 startLocalSpeedTest 里的 sampleTick）
 let localSpeedTestSampleTimer: number | null = null;
@@ -2125,7 +2207,44 @@ const localSpeedTest = reactive({
 });
 
 const localSpeedTestSummary = computed(() => {
-  return localSpeedTest.avgSpeed !== '-- Mbps' ? localSpeedTest.avgSpeed : '点击测速';
+  return localSpeedTest.avgSpeed !== '-- Mbps' ? localSpeedTest.avgSpeed : '未配置';
+});
+
+const SMS_FORWARD_STORAGE_KEY = 'systemToolsSmsForward';
+const savedSmsForward = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(SMS_FORWARD_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+})();
+const smsForward = reactive({
+  barkEnabled: !!savedSmsForward.barkEnabled,
+  barkUrl: savedSmsForward.barkUrl || '',
+  tgEnabled: !!savedSmsForward.tgEnabled,
+  tgBotToken: savedSmsForward.tgBotToken || '',
+  tgChatId: savedSmsForward.tgChatId || '',
+  lastId: Number(savedSmsForward.lastId || 0),
+  running: false,
+  loading: false,
+  forwarding: false,
+  status: '',
+});
+const smsMessages = ref<SmsMessage[]>([]);
+let smsForwardTimer: number | null = null;
+
+const rcLocal = reactive({
+  loading: false,
+  saving: false,
+  loaded: false,
+  content: '',
+  status: '',
+});
+
+const systemToolsSummary = computed(() => {
+  if (localSpeedTest.running) return '测速中...';
+  if (smsForward.running) return '短信监听中';
+  return localSpeedTestSummary.value;
 });
 
 // 速度曲线采样点：t=首字节起的经过秒数（横轴），v=瞬时速度 Mbps（纵轴）
@@ -2187,8 +2306,171 @@ function fmtTime(v: number): string {
   return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + 's';
 }
 
-function openLocalSpeedTestDialog() {
-  localSpeedTestDialogVisible.value = true;
+function openSystemToolsDialog(tab: SystemToolsTab = 'speedtest') {
+  systemToolsActiveTab.value = tab;
+  systemToolsDialogVisible.value = true;
+  if (tab === 'sms' && smsMessages.value.length === 0) {
+    loadSmsMessages();
+  }
+  if (tab === 'rcLocal' && !rcLocal.loaded) {
+    loadRcLocal();
+  }
+}
+
+function saveSmsForwardSettings() {
+  localStorage.setItem(SMS_FORWARD_STORAGE_KEY, JSON.stringify({
+    barkEnabled: smsForward.barkEnabled,
+    barkUrl: smsForward.barkUrl,
+    tgEnabled: smsForward.tgEnabled,
+    tgBotToken: smsForward.tgBotToken,
+    tgChatId: smsForward.tgChatId,
+    lastId: smsForward.lastId,
+  }));
+}
+
+async function loadSmsMessages() {
+  smsForward.loading = true;
+  try {
+    const res = await axios.get('/api/system/sms');
+    if (res.data.code !== 0) {
+      ElMessage.error(res.data.msg || '读取短信失败');
+      return;
+    }
+    smsMessages.value = res.data.data?.messages || [];
+    const maxId = smsMessages.value.reduce((max, msg) => Math.max(max, Number(msg.id || 0)), 0);
+    if (!smsForward.running && smsForward.lastId === 0) {
+      smsForward.lastId = maxId;
+      saveSmsForwardSettings();
+    }
+  } catch (e: any) {
+    ElMessage.error('读取短信失败: ' + (e?.message ?? e));
+  } finally {
+    smsForward.loading = false;
+  }
+}
+
+function validateSmsForwardTarget() {
+  if (!smsForward.barkEnabled && !smsForward.tgEnabled) {
+    ElMessage.warning('请至少启用 Bark 或 TG Bot');
+    return false;
+  }
+  if (smsForward.barkEnabled && !String(smsForward.barkUrl || '').trim()) {
+    ElMessage.warning('请填写 Bark 地址');
+    return false;
+  }
+  if (smsForward.tgEnabled && (!String(smsForward.tgBotToken || '').trim() || !String(smsForward.tgChatId || '').trim())) {
+    ElMessage.warning('请填写 TG Bot Token 和 Chat ID');
+    return false;
+  }
+  return true;
+}
+
+async function forwardSms(onlyLatest: boolean) {
+  if (!validateSmsForwardTarget()) return;
+  smsForward.forwarding = true;
+  smsForward.status = onlyLatest ? '正在发送最新短信...' : '正在检查新短信...';
+  saveSmsForwardSettings();
+  try {
+    const res = await axios.post('/api/system/sms/forward', {
+      bark_enabled: smsForward.barkEnabled,
+      bark_url: smsForward.barkUrl,
+      tg_enabled: smsForward.tgEnabled,
+      tg_bot_token: smsForward.tgBotToken,
+      tg_chat_id: smsForward.tgChatId,
+      last_id: onlyLatest ? 0 : smsForward.lastId,
+      only_latest: onlyLatest,
+    });
+    const data = res.data.data || {};
+    if (Array.isArray(data.messages) && data.messages.length > 0) {
+      smsMessages.value = data.messages.concat(smsMessages.value.filter(existing => !data.messages.some((m: SmsMessage) => m.id === existing.id)));
+    }
+    if (typeof data.latest_id === 'number') {
+      smsForward.lastId = data.latest_id;
+      saveSmsForwardSettings();
+    }
+    if (res.data.code !== 0) {
+      smsForward.status = res.data.msg || '短信转发失败';
+      ElMessage.error(smsForward.status);
+      return;
+    }
+    smsForward.status = `已发送 ${data.sent || 0} 次推送`;
+  } catch (e: any) {
+    smsForward.status = '短信转发失败: ' + (e?.message ?? e);
+    ElMessage.error(smsForward.status);
+  } finally {
+    smsForward.forwarding = false;
+  }
+}
+
+function forwardLatestSms() {
+  return forwardSms(true);
+}
+
+function startSmsForwardWatch() {
+  if (!validateSmsForwardTarget()) return;
+  smsForward.running = true;
+  smsForward.status = '正在监听新短信...';
+  saveSmsForwardSettings();
+  if (smsForwardTimer != null) clearInterval(smsForwardTimer);
+  smsForwardTimer = window.setInterval(() => {
+    if (!smsForward.forwarding) forwardSms(false);
+  }, 15000);
+  forwardSms(false);
+}
+
+function stopSmsForwardWatch() {
+  smsForward.running = false;
+  smsForward.status = '已停止监听';
+  if (smsForwardTimer != null) {
+    clearInterval(smsForwardTimer);
+    smsForwardTimer = null;
+  }
+  saveSmsForwardSettings();
+}
+
+function toggleSmsForward() {
+  if (smsForward.running) stopSmsForwardWatch();
+  else startSmsForwardWatch();
+}
+
+async function loadRcLocal() {
+  rcLocal.loading = true;
+  rcLocal.status = '';
+  try {
+    const res = await axios.get('/api/system/rc-local');
+    if (res.data.code !== 0) {
+      rcLocal.status = res.data.msg || '读取 rc.local 失败';
+      ElMessage.error(rcLocal.status);
+      return;
+    }
+    rcLocal.content = res.data.data?.content || '';
+    rcLocal.loaded = true;
+  } catch (e: any) {
+    rcLocal.status = '读取 rc.local 失败: ' + (e?.message ?? e);
+    ElMessage.error(rcLocal.status);
+  } finally {
+    rcLocal.loading = false;
+  }
+}
+
+async function saveRcLocal() {
+  rcLocal.saving = true;
+  rcLocal.status = '正在保存...';
+  try {
+    const res = await axios.put('/api/system/rc-local', { content: rcLocal.content });
+    if (res.data.code !== 0) {
+      rcLocal.status = res.data.msg || '保存失败';
+      ElMessage.error(rcLocal.status);
+      return;
+    }
+    rcLocal.status = '保存成功';
+    ElMessage.success('rc.local 已保存');
+  } catch (e: any) {
+    rcLocal.status = '保存失败: ' + (e?.message ?? e);
+    ElMessage.error(rcLocal.status);
+  } finally {
+    rcLocal.saving = false;
+  }
 }
 
 function normalizeSpeedTestThreads(value: unknown) {
@@ -4321,8 +4603,8 @@ async function openDeviceDialog() {
 // 改用「固定 body + 记录/还原 scrollY」：锁定时把 body 设为 position:fixed 并上移 scrollY,
 // 既挡住背景滚动又保留视觉位置；关闭时还原样式并 scrollTo 回原位。
 let lockedScrollY = 0;
-watch([deviceDialogVisible, mmDialogVisible, networkSettingsDialogVisible, wifiSettingsDialogVisible, localSpeedTestDialogVisible], ([deviceOpen, mmOpen, networkOpen, wifiOpen, speedTestOpen]) => {
-  const anyOpen = deviceOpen || mmOpen || networkOpen || wifiOpen || speedTestOpen;
+watch([deviceDialogVisible, mmDialogVisible, networkSettingsDialogVisible, wifiSettingsDialogVisible, systemToolsDialogVisible], ([deviceOpen, mmOpen, networkOpen, wifiOpen, toolsOpen]) => {
+  const anyOpen = deviceOpen || mmOpen || networkOpen || wifiOpen || toolsOpen;
   const body = document.body;
   if (anyOpen) {
     lockedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
@@ -4350,6 +4632,12 @@ watch(deviceDialogVisible, (open) => {
   if (!open) stopDeviceRfRefresh();
 });
 
+watch(systemToolsActiveTab, (tab) => {
+  if (!systemToolsDialogVisible.value) return;
+  if (tab === 'sms' && smsMessages.value.length === 0) loadSmsMessages();
+  if (tab === 'rcLocal' && !rcLocal.loaded) loadRcLocal();
+});
+
 onMounted(() => {
   initMmEntryState();
   fetchAllData();
@@ -4367,6 +4655,7 @@ onUnmounted(() => {
   stopAutoRefresh();
   stopMmAllPolls();
   stopLocalSpeedTest();
+  stopSmsForwardWatch();
   stopDeviceRfRefresh();
   if (mmGateClickTimer) {
     clearTimeout(mmGateClickTimer);
@@ -6331,7 +6620,99 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
+.system-tools-tabs :deep(.el-tabs__item) {
+  color: rgba(255, 255, 255, 0.7);
+}
+.system-tools-tabs :deep(.el-tabs__item.is-active) {
+  color: #ffffff;
+}
+.system-tools-tabs :deep(.el-tabs__active-bar) {
+  background: #7dd3fc;
+}
+.system-tool-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sms-forward-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.system-tool-section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.system-tool-section-title {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 13px;
+  font-weight: 700;
+}
+.system-tool-actions,
+.system-tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.system-tool-hint {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+}
+.sms-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow: auto;
+}
+.sms-message-item {
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.18);
+}
+.sms-message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+}
+.sms-message-meta strong {
+  color: rgba(255, 255, 255, 0.9);
+}
+.sms-message-content {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.system-tool-empty {
+  padding: 18px;
+  color: rgba(255, 255, 255, 0.56);
+  text-align: center;
+}
+.rc-local-editor :deep(.el-textarea__inner) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.5;
+}
+
 @media (max-width: 560px) {
+  .sms-forward-grid {
+    grid-template-columns: 1fr;
+  }
   .local-speedtest-header {
     flex-direction: column;
     gap: 10px;
