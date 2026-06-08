@@ -878,12 +878,12 @@
               <span class="value">{{simInfo?.values?.msisdn ?? '-'}}</span>
             </div>
             <div class="info-item">
-              <span class="label">IMSI</span>
-              <span class="value">{{ simInfo2.sim_imsi ?? '-' }}</span>
-            </div>
-            <div class="info-item">
               <span class="label">IMEI</span>
               <span class="value">{{ simInfo?.values?.imei ?? '-' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="label">IMSI</span>
+              <span class="value">{{ simInfo2.sim_imsi ?? '-' }}</span>
             </div>
 
             <div class="info-item">
