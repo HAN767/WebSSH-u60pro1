@@ -875,7 +875,7 @@
             </div>
             <div class="info-item">
               <span class="label">SIM 卡号</span>
-              <span class="value">{{simInfo?.values?.msisdn ?? '-'}}</span>
+              <span class="value">{{simInfo2?.msisdn ?? '-'}}</span>
             </div>
             <div class="info-item">
               <span class="label">IMEI</span>
@@ -1899,6 +1899,7 @@ interface SimInfo {
 interface SimInfo2 {
   sim_iccid: string;
   sim_imsi: string;
+  msisdn: string;
   Operator: string;
 }
 
