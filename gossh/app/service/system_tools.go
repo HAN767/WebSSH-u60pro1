@@ -338,7 +338,7 @@ func smsForwardPollOnce() error {
 	var errs []string
 	for _, msg := range targets {
 		title := fmt.Sprintf("短信 %s", msg.Number)
-		text := fmt.Sprintf("%s\n", msg.Content)
+		text := fmt.Sprintf("%s", msg.Content)
 		if cfg.BarkEnabled {
 			if err := sendBark(cfg.BarkURL, title, text); err != nil {
 				errs = append(errs, "Bark: "+err.Error())
