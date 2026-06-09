@@ -26,6 +26,8 @@ const smsForwardDefaultDir = "/data/kano_plugins/sms_forward"
 const smsForwardConfigName = "config.json"
 const smsForwardAutostartMarker = ".autostart"
 const smsForwardPollInterval = 3 * time.Second
+const smsForwardCompleteQuietWindow = 3 * time.Second
+const smsForwardCompleteMaxWait = 9 * time.Second
 
 type smsMessage struct {
 	ID       int    `json:"id"`
@@ -52,6 +54,19 @@ type smsForwardRuntimeStatus struct {
 	LastError string `json:"last_error"`
 	SentCount int    `json:"sent_count"`
 	LastID    int    `json:"last_id"`
+}
+
+type smsForwardPendingBatch struct {
+	Number    string
+	Message   smsMessage
+	signature string
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
+type smsForwardPendingState struct {
+	byNumber  map[string]*smsForwardPendingBatch
+	completed map[int]struct{}
 }
 
 var smsForwardMu sync.Mutex
@@ -284,7 +299,8 @@ func runSmsForwardWorker(stop <-chan struct{}, fromAutostart bool) {
 	ticker := time.NewTicker(smsForwardPollInterval)
 	defer ticker.Stop()
 
-	if err := smsForwardPollOnce(); err != nil {
+	pending := newSmsForwardPendingState()
+	if err := smsForwardPollOnce(pending); err != nil {
 		setSmsForwardLastError(err.Error())
 	}
 	for {
@@ -292,14 +308,14 @@ func runSmsForwardWorker(stop <-chan struct{}, fromAutostart bool) {
 		case <-stop:
 			return
 		case <-ticker.C:
-			if err := smsForwardPollOnce(); err != nil {
+			if err := smsForwardPollOnce(pending); err != nil {
 				setSmsForwardLastError(err.Error())
 			}
 		}
 	}
 }
 
-func smsForwardPollOnce() error {
+func smsForwardPollOnce(pending *smsForwardPendingState) error {
 	cfg, err := loadSmsForwardConfig()
 	if err != nil {
 		return err
@@ -334,36 +350,27 @@ func smsForwardPollOnce() error {
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
 
+	now := time.Now()
+	for _, msg := range targets {
+		pending.add(msg, now)
+	}
+
+	ready := pending.ready(now)
 	sent := 0
 	var errs []string
-	for _, msg := range targets {
-		title := fmt.Sprintf("短信 %s", msg.Number)
-		text := fmt.Sprintf("%s", msg.Content)
-		if cfg.BarkEnabled {
-			if err := sendBark(cfg.BarkURL, title, text); err != nil {
-				errs = append(errs, "Bark: "+err.Error())
-			} else {
-				sent++
-			}
-		}
-		if cfg.TgEnabled {
-			if err := sendTelegram(cfg.TgBotToken, cfg.TgChatID, text); err != nil {
-				errs = append(errs, "TG: "+err.Error())
-			} else {
-				sent++
-			}
-		}
-		if msg.ID > cfg.LastID {
-			cfg.LastID = msg.ID
-		}
+	for _, batch := range ready {
+		batchSent, batchErrs := sendSmsForwardBatch(cfg, batch)
+		sent += batchSent
+		errs = append(errs, batchErrs...)
+		pending.completed[batch.Message.ID] = struct{}{}
 	}
-	if cfg.LastID != latestID {
-		cfg.LastID = latestID
-	}
-	if len(targets) > 0 {
+	newLastID := pending.nextLastID(cfg.LastID)
+	if newLastID > cfg.LastID {
+		cfg.LastID = newLastID
 		if err := saveSmsForwardConfig(cfg); err != nil {
 			return err
 		}
+		pending.discardCompletedThrough(cfg.LastID)
 	}
 	setSmsForwardSent(sent, cfg.LastID)
 	if len(errs) > 0 {
@@ -371,6 +378,118 @@ func smsForwardPollOnce() error {
 	}
 	setSmsForwardLastError("")
 	return nil
+}
+
+func newSmsForwardPendingState() *smsForwardPendingState {
+	return &smsForwardPendingState{
+		byNumber:  make(map[string]*smsForwardPendingBatch),
+		completed: make(map[int]struct{}),
+	}
+}
+
+func (s *smsForwardPendingState) add(msg smsMessage, now time.Time) {
+	if _, done := s.completed[msg.ID]; done {
+		return
+	}
+	key := smsForwardPendingKey(msg)
+	signature := smsForwardMessageSignature(msg)
+	batch := s.byNumber[key]
+	if batch == nil {
+		batch = &smsForwardPendingBatch{
+			Number:    msg.Number,
+			Message:   msg,
+			signature: signature,
+			FirstSeen: now,
+			LastSeen:  now,
+		}
+		s.byNumber[key] = batch
+		return
+	}
+	if msg.ID < batch.Message.ID {
+		return
+	}
+	if msg.ID > batch.Message.ID || signature != batch.signature {
+		batch.Number = msg.Number
+		batch.Message = msg
+		batch.signature = signature
+		batch.LastSeen = now
+	}
+}
+
+func (s *smsForwardPendingState) ready(now time.Time) []*smsForwardPendingBatch {
+	ready := make([]*smsForwardPendingBatch, 0)
+	for key, batch := range s.byNumber {
+		if batch.Message.ID == 0 {
+			delete(s.byNumber, key)
+			continue
+		}
+		if now.Sub(batch.LastSeen) >= smsForwardCompleteQuietWindow || now.Sub(batch.FirstSeen) >= smsForwardCompleteMaxWait {
+			ready = append(ready, batch)
+			delete(s.byNumber, key)
+		}
+	}
+	sort.Slice(ready, func(i, j int) bool {
+		return ready[i].Message.ID < ready[j].Message.ID
+	})
+	return ready
+}
+
+func (s *smsForwardPendingState) nextLastID(current int) int {
+	minPendingID := 0
+	for _, batch := range s.byNumber {
+		if minPendingID == 0 || batch.Message.ID < minPendingID {
+			minPendingID = batch.Message.ID
+		}
+	}
+	next := current
+	for id := range s.completed {
+		if id > next && (minPendingID == 0 || id < minPendingID) {
+			next = id
+		}
+	}
+	return next
+}
+
+func (s *smsForwardPendingState) discardCompletedThrough(lastID int) {
+	for id := range s.completed {
+		if id <= lastID {
+			delete(s.completed, id)
+		}
+	}
+}
+
+func smsForwardPendingKey(msg smsMessage) string {
+	number := strings.TrimSpace(msg.Number)
+	if number == "" {
+		return fmt.Sprintf("message:%d", msg.ID)
+	}
+	return "number:" + number
+}
+
+func sendSmsForwardBatch(cfg smsForwardConfig, batch *smsForwardPendingBatch) (int, []string) {
+	title := fmt.Sprintf("短信 %s", batch.Number)
+	text := batch.Message.Content
+	sent := 0
+	var errs []string
+	if cfg.BarkEnabled {
+		if err := sendBark(cfg.BarkURL, title, text); err != nil {
+			errs = append(errs, "Bark: "+err.Error())
+		} else {
+			sent++
+		}
+	}
+	if cfg.TgEnabled {
+		if err := sendTelegram(cfg.TgBotToken, cfg.TgChatID, text); err != nil {
+			errs = append(errs, "TG: "+err.Error())
+		} else {
+			sent++
+		}
+	}
+	return sent, errs
+}
+
+func smsForwardMessageSignature(msg smsMessage) string {
+	return fmt.Sprintf("%d\x00%s\x00%s\x00%s", msg.ID, msg.Date, msg.Content, msg.RawHex)
 }
 
 func smsForwardDir() string {
