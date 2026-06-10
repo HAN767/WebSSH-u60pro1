@@ -1317,6 +1317,8 @@
         </el-checkbox-group>
         <div class="settings-actions">
           <el-button size="small" @click="lockCurrentLTEBands">锁当前频段</el-button>
+          <el-button size="small" @click="selectAllLTEBands">全选</el-button>
+          <el-button size="small" @click="clearAllLTEBands">全不选</el-button>
           <el-button size="small" @click="selectAllLTEBands">自动</el-button>
           <el-button size="small" type="primary" :loading="networkApplying === 'lteBand'" @click="applyLTEBandLock">应用 4G 锁频</el-button>
         </div>
@@ -1329,6 +1331,8 @@
         </el-checkbox-group>
         <div class="settings-actions">
           <el-button size="small" @click="lockCurrentNRBands">锁当前频段</el-button>
+          <el-button size="small" @click="selectAllNRBands">全选</el-button>
+          <el-button size="small" @click="clearAllNRBands">全不选</el-button>
           <el-button size="small" @click="selectAllNRBands">自动</el-button>
           <el-button size="small" type="primary" :loading="networkApplying === 'nrBand'" @click="applyNRBandLock">应用 5G 锁频</el-button>
         </div>
@@ -3342,6 +3346,10 @@ function selectAllLTEBands() {
   networkForm.lte_bands = [...lteBandOptions];
 }
 
+function clearAllLTEBands() {
+  networkForm.lte_bands = [];
+}
+
 function lockCurrentNRBands() {
   const bands = getCurrentNRBands();
   if (!bands.length) {
@@ -3353,6 +3361,10 @@ function lockCurrentNRBands() {
 
 function selectAllNRBands() {
   networkForm.nr_bands = [...nrBandOptions];
+}
+
+function clearAllNRBands() {
+  networkForm.nr_bands = [];
 }
 
 async function applyLTEBandLock() {
