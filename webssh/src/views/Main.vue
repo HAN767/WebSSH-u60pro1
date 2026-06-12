@@ -4779,8 +4779,14 @@ onUnmounted(() => {
 .page {
   color: white;
   min-height: 100vh;
+  min-height: 100dvh;
   background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #3b82f6 100%);
-  padding: 20px;
+  padding:
+    calc(20px + var(--app-safe-top, 0px))
+    calc(20px + var(--app-safe-right, 0px))
+    calc(20px + var(--app-safe-bottom, 0px))
+    calc(20px + var(--app-safe-left, 0px));
+  box-sizing: border-box;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -6026,7 +6032,11 @@ onUnmounted(() => {
 /* 响应式设计 */
 @media (max-width: 768px) {
   .page {
-    padding: 12px;
+    padding:
+      calc(12px + var(--app-safe-top, 0px))
+      calc(12px + var(--app-safe-right, 0px))
+      calc(12px + var(--app-safe-bottom, 0px))
+      calc(12px + var(--app-safe-left, 0px));
   }
 
   .page-header {
@@ -6086,7 +6096,11 @@ onUnmounted(() => {
 
 @media (max-width: 1100px) {
   .page {
-    padding: 8px;
+    padding:
+      calc(8px + var(--app-safe-top, 0px))
+      calc(8px + var(--app-safe-right, 0px))
+      calc(8px + var(--app-safe-bottom, 0px))
+      calc(8px + var(--app-safe-left, 0px));
   }
 
   .card-content {
