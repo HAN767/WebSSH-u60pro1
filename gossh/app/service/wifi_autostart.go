@@ -15,6 +15,7 @@ const (
 	wifiSettingsAutostartInitialDelay = 8 * time.Second
 	wifiSettingsAutostartMaxWait      = 2 * time.Minute
 	wifiSettingsAutostartRetry        = 5 * time.Second
+	wifiSettingsStatePollInterval     = 12 * time.Second
 )
 
 // InitWifiSettingsAutostart reapplies saved WiFi runtime settings after boot.
@@ -44,6 +45,8 @@ func InitWifiSettingsAutostart() {
 		}
 		slog.Info("wifi settings autostart: applied")
 	}()
+
+	go pollPersistedWifiState()
 }
 
 func loadLatestPersistedDeviceSettings() (PersistedDeviceSettings, bool, error) {
@@ -125,6 +128,65 @@ func applyPersistedWifiRuntimeSettings(settings PersistedDeviceSettings) error {
 			return fmt.Errorf("set wlan2 state failed: %w", err)
 		}
 	}
+	return nil
+}
+
+func pollPersistedWifiState() {
+	ticker := time.NewTicker(wifiSettingsStatePollInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		settings, ok, err := loadLatestPersistedDeviceSettings()
+		if err != nil {
+			slog.Warn("wifi state poll: load settings failed", "err", err)
+			continue
+		}
+		if !ok || !hasPersistedWifiState(settings) {
+			continue
+		}
+
+		if err := reconcilePersistedWifiState(settings); err != nil {
+			slog.Warn("wifi state poll: reconcile failed", "err", err)
+		}
+	}
+}
+
+func hasPersistedWifiState(settings PersistedDeviceSettings) bool {
+	return settings.Wifi24Enabled != nil || settings.Wifi5Enabled != nil
+}
+
+func reconcilePersistedWifiState(settings PersistedDeviceSettings) error {
+	if settings.Wifi24Enabled != nil {
+		if err := reconcileWifiIfaceState("wlan0", *settings.Wifi24Enabled); err != nil {
+			return fmt.Errorf("reconcile wlan0 failed: %w", err)
+		}
+	}
+	if settings.Wifi5Enabled != nil {
+		if err := reconcileWifiIfaceState("wlan2", *settings.Wifi5Enabled); err != nil {
+			return fmt.Errorf("reconcile wlan2 failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func reconcileWifiIfaceState(iface string, expectedUp bool) error {
+	status, err := getLinkStatus(iface)
+	if err != nil {
+		return err
+	}
+
+	currentUp := status == "up"
+	if status != "up" && status != "down" {
+		return fmt.Errorf("%s status unknown: %s", iface, status)
+	}
+	if currentUp == expectedUp {
+		return nil
+	}
+
+	if err := setWifiState(iface, expectedUp); err != nil {
+		return err
+	}
+	slog.Info("wifi state poll: corrected iface state", "iface", iface, "expected_up", expectedUp)
 	return nil
 }
 
