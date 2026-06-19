@@ -212,11 +212,13 @@ func SystemSmsForwardHandler(c *gin.Context) {
 	for _, msg := range targets {
 		title := fmt.Sprintf("短信 %s", msg.Number)
 		text := fmt.Sprintf("%s\n时间: %s", msg.Content, msg.Date)
+		msgSent := 0
 		if req.BarkEnabled {
 			if err := sendBark(req.BarkURL, title, text); err != nil {
 				errs = append(errs, "Bark: "+err.Error())
 			} else {
 				sent++
+				msgSent++
 			}
 		}
 		if req.TgEnabled {
@@ -224,6 +226,12 @@ func SystemSmsForwardHandler(c *gin.Context) {
 				errs = append(errs, "TG: "+err.Error())
 			} else {
 				sent++
+				msgSent++
+			}
+		}
+		if msgSent > 0 {
+			if err := markSmsRead(msg.ID); err != nil {
+				errs = append(errs, err.Error())
 			}
 		}
 	}
@@ -485,7 +493,26 @@ func sendSmsForwardBatch(cfg smsForwardConfig, batch *smsForwardPendingBatch) (i
 			sent++
 		}
 	}
+	if sent > 0 {
+		if err := markSmsRead(batch.Message.ID); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
 	return sent, errs
+}
+
+// markSmsRead 调用 ubus 将指定短信标记为已读（tag=0），id 取自短信本身
+func markSmsRead(id int) error {
+	if id <= 0 {
+		return nil
+	}
+	if _, err := utils.GetDataFromUbus("zwrt_wms", "zwrt_wms_modify_tag", map[string]interface{}{
+		"id":  fmt.Sprintf("%d;", id),
+		"tag": 0,
+	}); err != nil {
+		return fmt.Errorf("标记已读失败(id=%d): %w", id, err)
+	}
+	return nil
 }
 
 func smsForwardMessageSignature(msg smsMessage) string {
