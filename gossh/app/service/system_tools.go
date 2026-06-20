@@ -1205,6 +1205,19 @@ func buildDevuiHomeCards() {
 
 	if isLTE {
 		count := 0
+		// 主载波作为第一行，带主卡的 RSRP/SINR。
+		mainPCI := strings.TrimSpace(pci)
+		mainFreq := strings.TrimSpace(freq)
+		if caColumnComplete(mainPCI, band, mainFreq, bw) {
+			writeLine(mainPCI)
+			writeLine(band)
+			writeLine(mainFreq)
+			writeLine(bwText)
+			writeLine(rsrp)
+			writeLine(sinr)
+			count++
+		}
+		// 追加其它聚合载波，跳过与主载波 PCI+频点相同的条目，避免重复。
 		for _, line := range strings.Split(lteca, ";") {
 			if count >= 2 {
 				break
@@ -1220,8 +1233,11 @@ func buildDevuiHomeCards() {
 			if colBW != "" {
 				colBW += "M"
 			}
-			// LTE 载波 RSRP/SINR 数据源不提供，固定占位 "-"，故不参与完整性校验。
+			// LTE 辅载波 RSRP/SINR 数据源不提供，固定占位 "-"，故不参与完整性校验。
 			if !caColumnComplete(colPCI, fields[1], colFreq, fields[4]) {
+				continue
+			}
+			if colPCI == mainPCI && colFreq == mainFreq {
 				continue
 			}
 			count++
