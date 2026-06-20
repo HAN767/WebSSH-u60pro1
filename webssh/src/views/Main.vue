@@ -2632,7 +2632,6 @@ async function loadDevuiDownloadStatus() {
 
 async function downloadDevuiBinary() {
   devui.downloading = true;
-  devui.status = '正在下载 devui 补丁文件...';
   try {
     const res = await axios.post('/api/system/devui/download');
     applyDevuiDownloadStatus(res.data.data || {});
