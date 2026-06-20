@@ -1106,7 +1106,29 @@ func buildDevuiHomeCards() {
 
 	modeU := strings.ToUpper(mode)
 	wanBandU := strings.ToUpper(wanBand)
-	isLTE := strings.Contains(modeU, "LTE") || strings.HasPrefix(wanBandU, "LTE")
+
+	// 判断是否存在有效 5G 载波（NSA/SA 均算）。
+	// network_type 含 ENDC/NSA，或 nr5g_pci/nr5g_rsrp 为有效值。
+	// 注意 4294967295(0xFFFFFFFF)/65535 是无效占位；nr5g_cell_id 不可作判据。
+	nr5gPCI := devuiJSONGet(jsonText, "nr5g_pci")
+	nr5gRSRP := devuiJSONGet(jsonText, "nr5g_rsrp")
+	pciVal, pciNum := signalFloat(nr5gPCI)
+	pciOK := pciNum && pciVal >= 0 && pciVal != 4294967295 && pciVal != 65535
+	rsrpVal, rsrpNum := signalFloat(nr5gRSRP)
+	rsrpOK := rsrpNum && rsrpVal < 0
+	has5G := strings.Contains(modeU, "ENDC") ||
+		strings.Contains(modeU, "NSA") ||
+		pciOK || rsrpOK
+
+	// 纯 LTE：无 5G 且有 LTE 标识。
+	isLTE := !has5G &&
+		(strings.Contains(modeU, "LTE") || strings.Contains(wanBandU, "LTE"))
+
+	// NSA：有 5G 且存在 LTE 锚点。主卡走 NR 分支，LTE 锚点入 CA 行。
+	isNSA := has5G &&
+		(strings.Contains(modeU, "ENDC") ||
+			strings.Contains(modeU, "NSA") ||
+			strings.Contains(wanBandU, "LTE"))
 
 	var band, pci, freq, bw string
 	var rsrp, rsrq, sinr, rssi string
@@ -1209,6 +1231,26 @@ func buildDevuiHomeCards() {
 		}
 	} else {
 		count := 0
+		// NSA：把 LTE 锚点作为第一条 CA 行（NR 为主卡，LTE 作辅助）。
+		if isNSA {
+			lband := compactBand(wanBand)
+			lpci := fallbackDash(devuiJSONGet(jsonText, "lte_pci"))
+			lfreq := fallbackDash(devuiJSONGet(jsonText, "wan_active_channel"))
+			lbw := lteBWFromCA(lteca)
+			lbwText := "-"
+			if lbw != "" {
+				lbwText = lbw + "M"
+			}
+			lrsrp := fmtNum(fallbackDash(devuiJSONGet(jsonText, "lte_rsrp")))
+			lsinr := fmtNum(fallbackDash(devuiJSONGet(jsonText, "lte_snr")))
+			writeLine(lpci)
+			writeLine(lband)
+			writeLine(lfreq)
+			writeLine(lbwText)
+			writeLine(lrsrp)
+			writeLine(lsinr)
+			count++
+		}
 		for _, line := range strings.Split(nrca, ";") {
 			if count >= 2 {
 				break
