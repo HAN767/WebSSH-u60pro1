@@ -1676,10 +1676,10 @@
               <el-button size="small" :loading="devui.downloading" @click="downloadDevuiBinary">
                 {{ devui.binaryExists ? '重新下载' : '下载' }}
               </el-button>
-              <div v-if="devui.downloadState === 'downloading' || devui.downloadState === 'failed'" class="devui-download-progress">
+              <div v-if="devui.downloadState === 'downloading' || devui.downloadState === 'done' || devui.downloadState === 'failed'" class="devui-download-progress">
                 <el-progress
                   :percentage="devui.downloadPercent"
-                  :status="devui.downloadState === 'failed' ? 'exception' : undefined"
+                  :status="devui.downloadState === 'failed' ? 'exception' : (devui.downloadState === 'done' ? 'success' : undefined)"
                   :stroke-width="8" />
                 <div>{{ devui.downloadMsg || '正在下载...' }} · {{ formatSpeedTestBytes(devui.downloaded) }} / {{ devui.downloadTotal > 0 ? formatSpeedTestBytes(devui.downloadTotal) : '未知大小' }}</div>
               </div>
@@ -2357,6 +2357,7 @@ const devui = reactive({
 });
 const devuiWallpaperInput = ref<HTMLInputElement | null>(null);
 let devuiDownloadPollTimer: ReturnType<typeof setInterval> | null = null;
+let devuiDownloadClearTimer: ReturnType<typeof setTimeout> | null = null;
 
 const rcLocal = reactive({
   loading: false,
@@ -2621,16 +2622,36 @@ function applyDevuiDownloadStatus(data: any) {
   devui.downloading = devui.downloadState === 'downloading';
 }
 
+function clearDevuiDownloadProgress(delayMs = 0) {
+  if (devuiDownloadClearTimer) {
+    clearTimeout(devuiDownloadClearTimer);
+    devuiDownloadClearTimer = null;
+  }
+  const clear = () => applyDevuiDownloadStatus({ state: 'idle', msg: '', downloaded: 0, total: 0, percent: 0 });
+  if (delayMs > 0) {
+    devuiDownloadClearTimer = setTimeout(() => {
+      clear();
+      devuiDownloadClearTimer = null;
+    }, delayMs);
+  } else {
+    clear();
+  }
+}
+
 async function loadDevuiDownloadStatus() {
   try {
     const res = await axios.get('/api/system/devui/download/status');
-    if (res.data.code === 0) applyDevuiDownloadStatus(res.data.data || {});
+    if (res.data.code === 0) {
+      applyDevuiDownloadStatus(res.data.data || {});
+      if (devui.downloadState === 'done') clearDevuiDownloadProgress(2000);
+    }
   } catch {
     // ignore transient polling errors
   }
 }
 
 async function downloadDevuiBinary() {
+  clearDevuiDownloadProgress();
   devui.downloading = true;
   try {
     const res = await axios.post('/api/system/devui/download');
@@ -2656,7 +2677,7 @@ function startDevuiDownloadPoll() {
       devui.status = devui.downloadMsg || 'devui 补丁文件已下载';
       ElMessage.success(devui.status);
       await loadDevuiStatus();
-      applyDevuiDownloadStatus({ state: 'idle', msg: '', downloaded: 0, total: 0, percent: 0 });
+      clearDevuiDownloadProgress(2000);
     } else if (devui.downloadState === 'failed') {
       stopDevuiDownloadPoll();
       devui.status = devui.downloadMsg || '下载 devui 补丁文件失败';
@@ -2735,6 +2756,10 @@ function selectDevuiWallpaper(event: Event) {
 async function uploadDevuiWallpaper() {
   if (!devui.wallpaperFile) {
     ElMessage.warning('请先选择壁纸图片');
+    return;
+  }
+  if (devui.running || devui.mounted) {
+    ElMessage.warning('请先停止屏幕更新后再替换壁纸');
     return;
   }
   devui.wallpaperUploading = true;
@@ -5059,6 +5084,10 @@ onMounted(() => {
 onUnmounted(() => {
   stopAutoRefresh();
   stopDevuiDownloadPoll();
+  if (devuiDownloadClearTimer) {
+    clearTimeout(devuiDownloadClearTimer);
+    devuiDownloadClearTimer = null;
+  }
   if (devui.wallpaperPreview) {
     URL.revokeObjectURL(devui.wallpaperPreview);
   }

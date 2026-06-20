@@ -753,15 +753,16 @@ func SystemDevuiWallpaperHandler(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 5, "msg": err.Error(), "data": getDevuiStatus()})
 		return
 	}
-	if err := patchDevuiWallpaper(img); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 6, "msg": err.Error(), "data": getDevuiStatus()})
-		return
-	}
-	if getDevuiStatus().Running {
-		if err := restartDevuiService(); err != nil {
-			c.JSON(http.StatusOK, gin.H{"code": 7, "msg": "壁纸已替换，重启屏幕服务失败: " + err.Error(), "data": getDevuiStatus()})
+	status := getDevuiStatus()
+	if status.Running || status.Mounted {
+		if err := stopDevuiScreenUpdate(true); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 6, "msg": "替换壁纸前关闭屏幕更新失败: " + err.Error(), "data": getDevuiStatus()})
 			return
 		}
+	}
+	if err := patchDevuiWallpaper(img); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 7, "msg": err.Error(), "data": getDevuiStatus()})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "壁纸已替换", "data": getDevuiStatus()})
 }
