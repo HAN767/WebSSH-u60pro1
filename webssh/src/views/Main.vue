@@ -1676,6 +1676,13 @@
               <el-button size="small" :loading="devui.downloading" @click="downloadDevuiBinary">
                 {{ devui.binaryExists ? '重新下载' : '下载' }}
               </el-button>
+              <div v-if="devui.downloadState === 'downloading' || devui.downloadState === 'done' || devui.downloadState === 'failed'" class="devui-download-progress">
+                <el-progress
+                  :percentage="devui.downloadPercent"
+                  :status="devui.downloadState === 'failed' ? 'exception' : (devui.downloadState === 'done' ? 'success' : undefined)"
+                  :stroke-width="8" />
+                <div>{{ devui.downloadMsg || '正在下载...' }} · {{ formatSpeedTestBytes(devui.downloaded) }} / {{ devui.downloadTotal > 0 ? formatSpeedTestBytes(devui.downloadTotal) : '未知大小' }}</div>
+              </div>
             </div>
             <div><span>挂载状态</span><strong>{{ devui.mounted ? '已挂载' : '未挂载' }}</strong></div>
             <div class="devui-data-status">
@@ -2335,6 +2342,11 @@ const devui = reactive({
   dataReady: false,
   dataError: '',
   downloading: false,
+  downloadState: 'idle',
+  downloadMsg: '',
+  downloaded: 0,
+  downloadTotal: 0,
+  downloadPercent: 0,
   controlChanging: false,
   autostartChanging: false,
   wallpaperUploading: false,
@@ -2344,6 +2356,7 @@ const devui = reactive({
   status: '',
 });
 const devuiWallpaperInput = ref<HTMLInputElement | null>(null);
+let devuiDownloadPollTimer: ReturnType<typeof setInterval> | null = null;
 
 const rcLocal = reactive({
   loading: false,
@@ -2429,6 +2442,9 @@ function openSystemToolsDialog(tab: SystemToolsTab = 'speedtest') {
   }
   if (tab === 'devui') {
     loadDevuiStatus();
+    loadDevuiDownloadStatus().then(() => {
+      if (devui.downloadState === 'downloading') startDevuiDownloadPoll();
+    });
   }
   if (tab === 'rcLocal' && !rcLocal.loaded) {
     loadRcLocal();
@@ -2596,24 +2612,64 @@ async function loadDevuiStatus() {
   }
 }
 
+function applyDevuiDownloadStatus(data: any) {
+  devui.downloadState = data.state || 'idle';
+  devui.downloadMsg = data.msg || '';
+  devui.downloaded = Number(data.downloaded || 0);
+  devui.downloadTotal = Number(data.total || 0);
+  devui.downloadPercent = Number(data.percent || 0);
+  devui.downloading = devui.downloadState === 'downloading';
+}
+
+async function loadDevuiDownloadStatus() {
+  try {
+    const res = await axios.get('/api/system/devui/download/status');
+    if (res.data.code === 0) applyDevuiDownloadStatus(res.data.data || {});
+  } catch {
+    // ignore transient polling errors
+  }
+}
+
 async function downloadDevuiBinary() {
   devui.downloading = true;
   devui.status = '正在下载 devui 补丁文件...';
   try {
     const res = await axios.post('/api/system/devui/download');
-    applyDevuiStatus(res.data.data || {});
+    applyDevuiDownloadStatus(res.data.data || {});
     if (res.data.code !== 0) {
       ElMessage.error(res.data.msg || '下载 devui 补丁文件失败');
       return;
     }
-    devui.status = res.data.msg || 'devui 补丁文件已下载';
-    ElMessage.success(devui.status);
+    startDevuiDownloadPoll();
   } catch (e: any) {
     devui.status = '下载 devui 补丁文件失败: ' + (e?.message ?? e);
     ElMessage.error(devui.status);
-  } finally {
     devui.downloading = false;
-    await loadDevuiStatus();
+  }
+}
+
+function startDevuiDownloadPoll() {
+  if (devuiDownloadPollTimer) return;
+  devuiDownloadPollTimer = setInterval(async () => {
+    await loadDevuiDownloadStatus();
+    if (devui.downloadState === 'done') {
+      stopDevuiDownloadPoll();
+      devui.status = devui.downloadMsg || 'devui 补丁文件已下载';
+      ElMessage.success(devui.status);
+      await loadDevuiStatus();
+    } else if (devui.downloadState === 'failed') {
+      stopDevuiDownloadPoll();
+      devui.status = devui.downloadMsg || '下载 devui 补丁文件失败';
+      ElMessage.error(devui.status);
+      await loadDevuiStatus();
+    }
+  }, 1000);
+}
+
+function stopDevuiDownloadPoll() {
+  if (devuiDownloadPollTimer) {
+    clearInterval(devuiDownloadPollTimer);
+    devuiDownloadPollTimer = null;
   }
 }
 
@@ -4976,7 +5032,12 @@ watch(systemToolsActiveTab, (tab) => {
     loadSmsForwardStatus();
     if (smsMessages.value.length === 0) loadSmsMessages();
   }
-  if (tab === 'devui') loadDevuiStatus();
+  if (tab === 'devui') {
+    loadDevuiStatus();
+    loadDevuiDownloadStatus().then(() => {
+      if (devui.downloadState === 'downloading') startDevuiDownloadPoll();
+    });
+  }
   if (tab === 'rcLocal' && !rcLocal.loaded) loadRcLocal();
 });
 
@@ -4997,6 +5058,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopAutoRefresh();
+  stopDevuiDownloadPoll();
   if (devui.wallpaperPreview) {
     URL.revokeObjectURL(devui.wallpaperPreview);
   }
@@ -7071,6 +7133,16 @@ onUnmounted(() => {
 .devui-patch-status .el-button {
   margin-top: 8px;
   margin-left: 0;
+}
+.devui-download-progress {
+  margin-top: 8px;
+}
+.devui-download-progress div {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 .devui-status-grid em {
   display: block;

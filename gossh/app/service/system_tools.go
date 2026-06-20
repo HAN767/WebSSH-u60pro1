@@ -37,7 +37,7 @@ const smsForwardCompleteQuietWindow = 3 * time.Second
 const smsForwardCompleteMaxWait = 9 * time.Second
 const devuiDefaultDir = "/data/kano_plugins/devui"
 const devuiBinaryName = "zte_topsw_devui.patched"
-const devuiDownloadURL = "https://github.com/Jack-bin183/WebSSH-u60pro/releases/latest/download/zte_topsw_devui.patched"
+const devuiDownloadURL = "https://raw.githubusercontent.com/Jack-bin183/WebSSH-u60pro/zte_topsw_devui/zte_topsw_devui.patched"
 const devuiAutostartMarker = ".autostart"
 const devuiMountTarget = "/usr/bin/zte_topsw_devui"
 const devuiHomeCardsPath = "/tmp/zte_home_cards"
@@ -91,13 +91,6 @@ type smsForwardPendingState struct {
 	completed map[int]struct{}
 }
 
-var smsForwardMu sync.Mutex
-var smsForwardStop chan struct{}
-var smsForwardStatus smsForwardRuntimeStatus
-var devuiMu sync.Mutex
-var devuiStop chan struct{}
-var devuiStatus devuiRuntimeStatus
-
 type devuiRuntimeStatus struct {
 	Running          bool   `json:"running"`
 	AutostartEnabled bool   `json:"autostart_enabled"`
@@ -107,6 +100,25 @@ type devuiRuntimeStatus struct {
 	DataError        string `json:"data_error"`
 	LastError        string `json:"last_error"`
 }
+
+type devuiDownloadStatus struct {
+	State      string `json:"state"`
+	Msg        string `json:"msg"`
+	Downloaded int64  `json:"downloaded"`
+	Total      int64  `json:"total"`
+	Percent    int    `json:"percent"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+var smsForwardMu sync.Mutex
+var smsForwardStop chan struct{}
+var smsForwardStatus smsForwardRuntimeStatus
+var devuiMu sync.Mutex
+var devuiStop chan struct{}
+var devuiStatus devuiRuntimeStatus
+var devuiDownloadMu sync.Mutex
+var devuiDownloadStatusMu sync.RWMutex
+var devuiDownloadStatusVar = devuiDownloadStatus{State: "idle", Msg: "暂无下载任务"}
 
 func SystemSmsListHandler(c *gin.Context) {
 	messages, err := loadSmsMessages()
@@ -659,11 +671,19 @@ func SystemDevuiStatusHandler(c *gin.Context) {
 }
 
 func SystemDevuiDownloadHandler(c *gin.Context) {
-	if err := ensureDevuiBinary(); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": err.Error(), "data": getDevuiStatus()})
+	if getDevuiDownloadStatus().State == "downloading" {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "已有下载任务正在进行", "data": getDevuiDownloadStatus()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "devui 补丁文件已下载", "data": getDevuiStatus()})
+	setDevuiDownloadStatus(func(s *devuiDownloadStatus) {
+		*s = devuiDownloadStatus{State: "downloading", Msg: "正在准备下载...", UpdatedAt: time.Now().Format(time.RFC3339)}
+	})
+	go runDevuiDownloadTask()
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "已开始下载", "data": getDevuiDownloadStatus()})
+}
+
+func SystemDevuiDownloadStatusHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": getDevuiDownloadStatus()})
 }
 
 func SystemDevuiControlHandler(c *gin.Context) {
@@ -870,6 +890,49 @@ func setDevuiLastError(msg string) {
 	devuiStatus.LastError = msg
 }
 
+func getDevuiDownloadStatus() devuiDownloadStatus {
+	devuiDownloadStatusMu.RLock()
+	defer devuiDownloadStatusMu.RUnlock()
+	return devuiDownloadStatusVar
+}
+
+func setDevuiDownloadStatus(fn func(*devuiDownloadStatus)) {
+	devuiDownloadStatusMu.Lock()
+	defer devuiDownloadStatusMu.Unlock()
+	fn(&devuiDownloadStatusVar)
+	devuiDownloadStatusVar.UpdatedAt = time.Now().Format(time.RFC3339)
+	if devuiDownloadStatusVar.Total > 0 {
+		percent := int(devuiDownloadStatusVar.Downloaded * 100 / devuiDownloadStatusVar.Total)
+		if percent > 100 {
+			percent = 100
+		}
+		devuiDownloadStatusVar.Percent = percent
+	}
+}
+
+func runDevuiDownloadTask() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if err := downloadDevuiBinaryFile(ctx, true, func(downloaded, total int64) {
+		setDevuiDownloadStatus(func(s *devuiDownloadStatus) {
+			s.Msg = "正在下载 devui 补丁文件..."
+			s.Downloaded = downloaded
+			s.Total = total
+		})
+	}); err != nil {
+		setDevuiDownloadStatus(func(s *devuiDownloadStatus) {
+			s.State = "failed"
+			s.Msg = "下载失败: " + err.Error()
+		})
+		return
+	}
+	setDevuiDownloadStatus(func(s *devuiDownloadStatus) {
+		s.State = "done"
+		s.Msg = "devui 补丁文件已下载"
+		s.Percent = 100
+	})
+}
+
 func devuiDir() string {
 	return devuiDefaultDir
 }
@@ -907,13 +970,23 @@ func ensureDevuiBinary() error {
 		}
 		return nil
 	}
+	return downloadDevuiBinaryFile(context.Background(), false, nil)
+}
+
+func downloadDevuiBinaryFile(ctx context.Context, force bool, onProgress func(downloaded, total int64)) error {
+	devuiDownloadMu.Lock()
+	defer devuiDownloadMu.Unlock()
+	path := devuiBinaryPath()
+	if !force {
+		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+			return os.Chmod(path, 0755)
+		}
+	}
 	if err := os.MkdirAll(devuiDir(), 0755); err != nil {
 		return fmt.Errorf("创建屏幕更新目录失败: %w", err)
 	}
 	tmp := path + ".download"
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	if err := mihomoDownloadFile(ctx, devuiDownloadURL, tmp, nil); err != nil {
+	if err := mihomoDownloadFile(ctx, devuiDownloadURL, tmp, onProgress); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("下载 devui 文件失败: %w", err)
 	}
