@@ -2604,12 +2604,26 @@ function applyDevuiStatus(data: any) {
   if (devui.binaryExists && (!hadBinary || !devui.binaryWallpaperPreview)) {
     refreshDevuiWallpaperPreview();
   } else if (!devui.binaryExists) {
+    if (devui.binaryWallpaperPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(devui.binaryWallpaperPreview);
+    }
     devui.binaryWallpaperPreview = '';
   }
 }
 
-function refreshDevuiWallpaperPreview() {
-  devui.binaryWallpaperPreview = `/api/system/devui/wallpaper/preview?t=${Date.now()}`;
+async function refreshDevuiWallpaperPreview() {
+  if (!devui.binaryExists) return;
+  try {
+    const res = await axios.get('/api/system/devui/wallpaper/preview', {
+      responseType: 'blob',
+    });
+    if (devui.binaryWallpaperPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(devui.binaryWallpaperPreview);
+    }
+    devui.binaryWallpaperPreview = URL.createObjectURL(res.data);
+  } catch {
+    devui.binaryWallpaperPreview = '';
+  }
 }
 
 async function loadDevuiStatus() {
@@ -5113,6 +5127,9 @@ onUnmounted(() => {
   if (devuiDownloadClearTimer) {
     clearTimeout(devuiDownloadClearTimer);
     devuiDownloadClearTimer = null;
+  }
+  if (devui.binaryWallpaperPreview.startsWith('blob:')) {
+    URL.revokeObjectURL(devui.binaryWallpaperPreview);
   }
   if (devui.uploadWallpaperPreview) {
     URL.revokeObjectURL(devui.uploadWallpaperPreview);
