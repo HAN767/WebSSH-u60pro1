@@ -1111,10 +1111,6 @@ func buildDevuiHomeCards() {
 	// 关键：用户可能选了 NSA 模式但当前基站不支持，此时 network_type 仍含 ENDC/NSA，
 	// 但 nr5g_* 全为无效占位 —— 这种情况应按纯 LTE 处理，不能凭模式关键字判 5G。
 	// 因此 has5G 只认 nr5g_pci / nr5g_rsrp 的实际有效性。
-	// 判断是否存在「有效」5G 载波。
-	// 关键：用户可能选了 NSA 模式但当前基站不支持，此时 network_type 仍含 ENDC/NSA，
-	// 但 nr5g_* 全为无效占位 —— 这种情况应按纯 LTE 处理，不能凭模式关键字判 5G。
-	// 因此 has5G 只认 nr5g_pci / nr5g_rsrp 的实际有效性。
 	// 注意 4294967295(0xFFFFFFFF)/65535 是无效占位；nr5g_cell_id 不可作判据。
 	nr5gPCI := devuiJSONGet(jsonText, "nr5g_pci")
 	nr5gRSRP := devuiJSONGet(jsonText, "nr5g_rsrp")
@@ -1123,15 +1119,11 @@ func buildDevuiHomeCards() {
 	rsrpVal, rsrpNum := signalFloat(nr5gRSRP)
 	rsrpOK := rsrpNum && rsrpVal < 0
 	has5G := pciOK && rsrpOK
-	has5G := pciOK && rsrpOK
 
-	// 纯 LTE：无有效 5G 且有 LTE 标识。
 	// 纯 LTE：无有效 5G 且有 LTE 标识。
 	isLTE := !has5G &&
 		(strings.Contains(modeU, "LTE") || strings.Contains(wanBandU, "LTE"))
 
-	// NSA：有有效 5G 且存在 LTE 锚点。主卡走 NR 分支，LTE 锚点入 CA 行。
-	isNSA := has5G && strings.Contains(wanBandU, "LTE")
 	// NSA：有有效 5G 且存在 LTE 锚点。主卡走 NR 分支，LTE 锚点入 CA 行。
 	isNSA := has5G && strings.Contains(wanBandU, "LTE")
 
@@ -1240,18 +1232,6 @@ func buildDevuiHomeCards() {
 			lrsrp := fmtNum(strings.TrimSpace(devuiJSONGet(jsonText, "lte_rsrp")))
 			lsinr := fmtNum(strings.TrimSpace(devuiJSONGet(jsonText, "lte_snr")))
 			if caColumnComplete(lpci, lbandRaw, lfreq, lbwRaw, lrsrp, lsinr) {
-			lpci := strings.TrimSpace(devuiJSONGet(jsonText, "lte_pci"))
-			lbandRaw := strings.TrimSpace(wanBand)
-			lband := compactBand(wanBand)
-			lfreq := strings.TrimSpace(devuiJSONGet(jsonText, "wan_active_channel"))
-			lbwRaw := lteBWFromCA(lteca)
-			lbwText := lbwRaw
-			if lbwText != "" {
-				lbwText += "M"
-			}
-			lrsrp := fmtNum(strings.TrimSpace(devuiJSONGet(jsonText, "lte_rsrp")))
-			lsinr := fmtNum(strings.TrimSpace(devuiJSONGet(jsonText, "lte_snr")))
-			if caColumnComplete(lpci, lbandRaw, lfreq, lbwRaw, lrsrp, lsinr) {
 				writeLine(lpci)
 				writeLine(lband)
 				writeLine(lfreq)
@@ -1279,25 +1259,9 @@ func buildDevuiHomeCards() {
 			colRSRP := devuiStripDotZero(strings.TrimSpace(fields[7]))
 			colSINR := devuiStripDotZero(strings.TrimSpace(fields[9]))
 			if !caColumnComplete(colPCI, fields[3], colFreq, fields[5], colRSRP, colSINR) {
-			colPCI := strings.TrimSpace(fields[1])
-			colBand := "N" + strings.TrimSpace(fields[3])
-			colFreq := strings.TrimSpace(fields[4])
-			colBW := strings.TrimSpace(fields[5])
-			if colBW != "" {
-				colBW += "M"
-			}
-			colRSRP := devuiStripDotZero(strings.TrimSpace(fields[7]))
-			colSINR := devuiStripDotZero(strings.TrimSpace(fields[9]))
-			if !caColumnComplete(colPCI, fields[3], colFreq, fields[5], colRSRP, colSINR) {
 				continue
 			}
 			count++
-			writeLine(colPCI)
-			writeLine(colBand)
-			writeLine(colFreq)
-			writeLine(colBW)
-			writeLine(colRSRP)
-			writeLine(colSINR)
 			writeLine(colPCI)
 			writeLine(colBand)
 			writeLine(colFreq)
@@ -1509,16 +1473,6 @@ func devuiStripDotZero(value string) string {
 	return devuiDotZeroRe.ReplaceAllString(value, "")
 }
 
-// caColumnComplete 判断一列 CA 的 6 个展示值（PCI/频段/频点或信道/带宽/RSRP/SINR）
-// 是否全部有效。任意一个为空、"-"、"--" 即视为残值列，整列丢弃。
-func caColumnComplete(values ...string) bool {
-	for _, v := range values {
-		v = strings.TrimSpace(v)
-		if v == "" || v == "-" || v == "--" {
-			return false
-		}
-	}
-	return true
 // caColumnComplete 判断一列 CA 的 6 个展示值（PCI/频段/频点或信道/带宽/RSRP/SINR）
 // 是否全部有效。任意一个为空、"-"、"--" 即视为残值列，整列丢弃。
 func caColumnComplete(values ...string) bool {
