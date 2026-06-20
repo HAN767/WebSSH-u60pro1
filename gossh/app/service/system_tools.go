@@ -1217,18 +1217,26 @@ func buildDevuiHomeCards() {
 			if len(fields) < 5 {
 				continue
 			}
-			if !validPCI(fields[0]) {
-				continue
-			}
 			if !skipped && fields[0] == pci && fields[3] == freq {
 				skipped = true
 				continue
 			}
+			colPCI := strings.TrimSpace(fields[0])
+			colBand := "B" + strings.TrimSpace(fields[1])
+			colFreq := strings.TrimSpace(fields[3])
+			colBW := strings.TrimSpace(fields[4])
+			if colBW != "" {
+				colBW += "M"
+			}
+			// LTE 辅载波 RSRP/SINR 数据源不提供，固定占位 "-"，故不参与完整性校验。
+			if !caColumnComplete(colPCI, fields[1], colFreq, fields[4]) {
+				continue
+			}
 			count++
-			writeLine(fields[0])
-			writeLine("B" + fields[1])
-			writeLine(fields[3])
-			writeLine(fields[4] + "M")
+			writeLine(colPCI)
+			writeLine(colBand)
+			writeLine(colFreq)
+			writeLine(colBW)
 			writeLine("-")
 			writeLine("-")
 		}
@@ -1236,17 +1244,18 @@ func buildDevuiHomeCards() {
 		count := 0
 		// NSA：把 LTE 锚点作为第一条 CA 行（NR 为主卡，LTE 作辅助）。
 		if isNSA {
-			lpci := devuiJSONGet(jsonText, "lte_pci")
-			if validPCI(lpci) {
-				lband := compactBand(wanBand)
-				lfreq := fallbackDash(devuiJSONGet(jsonText, "wan_active_channel"))
-				lbw := lteBWFromCA(lteca)
-				lbwText := "-"
-				if lbw != "" {
-					lbwText = lbw + "M"
-				}
-				lrsrp := fmtNum(fallbackDash(devuiJSONGet(jsonText, "lte_rsrp")))
-				lsinr := fmtNum(fallbackDash(devuiJSONGet(jsonText, "lte_snr")))
+			lpci := strings.TrimSpace(devuiJSONGet(jsonText, "lte_pci"))
+			lbandRaw := strings.TrimSpace(wanBand)
+			lband := compactBand(wanBand)
+			lfreq := strings.TrimSpace(devuiJSONGet(jsonText, "wan_active_channel"))
+			lbwRaw := lteBWFromCA(lteca)
+			lbwText := lbwRaw
+			if lbwText != "" {
+				lbwText += "M"
+			}
+			lrsrp := fmtNum(strings.TrimSpace(devuiJSONGet(jsonText, "lte_rsrp")))
+			lsinr := fmtNum(strings.TrimSpace(devuiJSONGet(jsonText, "lte_snr")))
+			if caColumnComplete(lpci, lbandRaw, lfreq, lbwRaw, lrsrp, lsinr) {
 				writeLine(lpci)
 				writeLine(lband)
 				writeLine(lfreq)
@@ -1264,16 +1273,25 @@ func buildDevuiHomeCards() {
 			if len(fields) < 11 {
 				continue
 			}
-			if !validPCI(fields[1]) {
+			colPCI := strings.TrimSpace(fields[1])
+			colBand := "N" + strings.TrimSpace(fields[3])
+			colFreq := strings.TrimSpace(fields[4])
+			colBW := strings.TrimSpace(fields[5])
+			if colBW != "" {
+				colBW += "M"
+			}
+			colRSRP := devuiStripDotZero(strings.TrimSpace(fields[7]))
+			colSINR := devuiStripDotZero(strings.TrimSpace(fields[9]))
+			if !caColumnComplete(colPCI, fields[3], colFreq, fields[5], colRSRP, colSINR) {
 				continue
 			}
 			count++
-			writeLine(fields[1])
-			writeLine("N" + fields[3])
-			writeLine(fields[4])
-			writeLine(fields[5] + "M")
-			writeLine(devuiStripDotZero(fields[7]))
-			writeLine(devuiStripDotZero(fields[9]))
+			writeLine(colPCI)
+			writeLine(colBand)
+			writeLine(colFreq)
+			writeLine(colBW)
+			writeLine(colRSRP)
+			writeLine(colSINR)
 		}
 	}
 
@@ -1479,15 +1497,16 @@ func devuiStripDotZero(value string) string {
 	return devuiDotZeroRe.ReplaceAllString(value, "")
 }
 
-// validPCI 判断 CA 列的 PCI 是否有效，过滤切换瞬间的残值列。
-// 空、"-"、"--" 或无法解析为数字，均视为无效。
-func validPCI(value string) bool {
-	v := strings.TrimSpace(value)
-	if v == "" || v == "-" || v == "--" {
-		return false
+// caColumnComplete 判断一列 CA 的 6 个展示值（PCI/频段/频点或信道/带宽/RSRP/SINR）
+// 是否全部有效。任意一个为空、"-"、"--" 即视为残值列，整列丢弃。
+func caColumnComplete(values ...string) bool {
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" || v == "-" || v == "--" {
+			return false
+		}
 	}
-	_, err := strconv.ParseFloat(v, 64)
-	return err == nil
+	return true
 }
 
 func fmtNum(value string) string {
