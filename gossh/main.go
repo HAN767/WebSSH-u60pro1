@@ -1055,6 +1055,7 @@ func main() {
 		auth.POST("/api/system/sms-forward/control", service.SystemSmsForwardControlHandler)
 		auth.POST("/api/system/sms-forward/autostart", service.SystemSmsForwardAutostartHandler)
 		auth.GET("/api/system/devui/status", service.SystemDevuiStatusHandler)
+		auth.POST("/api/system/devui/download", service.SystemDevuiDownloadHandler)
 		auth.POST("/api/system/devui/control", service.SystemDevuiControlHandler)
 		auth.POST("/api/system/devui/autostart", service.SystemDevuiAutostartHandler)
 		auth.POST("/api/system/devui/wallpaper", service.SystemDevuiWallpaperHandler)

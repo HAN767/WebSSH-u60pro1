@@ -1670,7 +1670,13 @@
             </div>
           </div>
           <div class="devui-status-grid">
-            <div><span>补丁文件</span><strong>{{ devui.binaryExists ? '已下载' : '未下载' }}</strong></div>
+            <div class="devui-patch-status">
+              <span>补丁文件</span>
+              <strong>{{ devui.binaryExists ? '已下载' : '未下载' }}</strong>
+              <el-button size="small" :loading="devui.downloading" @click="downloadDevuiBinary">
+                {{ devui.binaryExists ? '重新下载' : '下载' }}
+              </el-button>
+            </div>
             <div><span>挂载状态</span><strong>{{ devui.mounted ? '已挂载' : '未挂载' }}</strong></div>
             <div class="devui-data-status">
               <span>数据接口</span>
@@ -2328,6 +2334,7 @@ const devui = reactive({
   mounted: false,
   dataReady: false,
   dataError: '',
+  downloading: false,
   controlChanging: false,
   autostartChanging: false,
   wallpaperUploading: false,
@@ -2586,6 +2593,27 @@ async function loadDevuiStatus() {
     ElMessage.error(devui.status);
   } finally {
     devui.loading = false;
+  }
+}
+
+async function downloadDevuiBinary() {
+  devui.downloading = true;
+  devui.status = '正在下载 devui 补丁文件...';
+  try {
+    const res = await axios.post('/api/system/devui/download');
+    applyDevuiStatus(res.data.data || {});
+    if (res.data.code !== 0) {
+      ElMessage.error(res.data.msg || '下载 devui 补丁文件失败');
+      return;
+    }
+    devui.status = res.data.msg || 'devui 补丁文件已下载';
+    ElMessage.success(devui.status);
+  } catch (e: any) {
+    devui.status = '下载 devui 补丁文件失败: ' + (e?.message ?? e);
+    ElMessage.error(devui.status);
+  } finally {
+    devui.downloading = false;
+    await loadDevuiStatus();
   }
 }
 
@@ -7039,6 +7067,10 @@ onUnmounted(() => {
   color: rgba(255, 255, 255, 0.88);
   font-size: 13px;
   line-height: 1.4;
+}
+.devui-patch-status .el-button {
+  margin-top: 8px;
+  margin-left: 0;
 }
 .devui-status-grid em {
   display: block;

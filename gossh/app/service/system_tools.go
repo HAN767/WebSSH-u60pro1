@@ -658,6 +658,14 @@ func SystemDevuiStatusHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "data": getDevuiStatus()})
 }
 
+func SystemDevuiDownloadHandler(c *gin.Context) {
+	if err := ensureDevuiBinary(); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": err.Error(), "data": getDevuiStatus()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "devui 补丁文件已下载", "data": getDevuiStatus()})
+}
+
 func SystemDevuiControlHandler(c *gin.Context) {
 	var req struct {
 		Enabled bool `json:"enabled"`
