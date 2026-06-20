@@ -862,11 +862,11 @@ func devuiWriteScreenFiles() {
 func getDevuiStatus() devuiRuntimeStatus {
 	devuiMu.Lock()
 	status := devuiStatus
-	status.Running = devuiStop != nil
 	devuiMu.Unlock()
 	status.AutostartEnabled = getDevuiAutostartEnabled()
 	status.BinaryExists = fileExists(devuiBinaryPath())
 	status.Mounted = isDevuiMounted()
+	status.Running = status.Mounted
 	status.DataReady, status.DataError = devuiDataInterfaceStatus()
 	return status
 }
