@@ -1676,10 +1676,10 @@
               <el-button size="small" :loading="devui.downloading" @click="downloadDevuiBinary">
                 {{ devui.binaryExists ? '重新下载' : '下载' }}
               </el-button>
-              <div v-if="devui.downloadState === 'downloading' || devui.downloadState === 'done' || devui.downloadState === 'failed'" class="devui-download-progress">
+              <div v-if="devui.downloadState === 'downloading' || devui.downloadState === 'failed'" class="devui-download-progress">
                 <el-progress
                   :percentage="devui.downloadPercent"
-                  :status="devui.downloadState === 'failed' ? 'exception' : (devui.downloadState === 'done' ? 'success' : undefined)"
+                  :status="devui.downloadState === 'failed' ? 'exception' : undefined"
                   :stroke-width="8" />
                 <div>{{ devui.downloadMsg || '正在下载...' }} · {{ formatSpeedTestBytes(devui.downloaded) }} / {{ devui.downloadTotal > 0 ? formatSpeedTestBytes(devui.downloadTotal) : '未知大小' }}</div>
               </div>
@@ -2656,6 +2656,7 @@ function startDevuiDownloadPoll() {
       devui.status = devui.downloadMsg || 'devui 补丁文件已下载';
       ElMessage.success(devui.status);
       await loadDevuiStatus();
+      applyDevuiDownloadStatus({ state: 'idle', msg: '', downloaded: 0, total: 0, percent: 0 });
     } else if (devui.downloadState === 'failed') {
       stopDevuiDownloadPoll();
       devui.status = devui.downloadMsg || '下载 devui 补丁文件失败';

@@ -892,8 +892,15 @@ func setDevuiLastError(msg string) {
 
 func getDevuiDownloadStatus() devuiDownloadStatus {
 	devuiDownloadStatusMu.RLock()
-	defer devuiDownloadStatusMu.RUnlock()
-	return devuiDownloadStatusVar
+	status := devuiDownloadStatusVar
+	devuiDownloadStatusMu.RUnlock()
+	if status.State == "done" && !fileExists(devuiBinaryPath()) {
+		status = devuiDownloadStatus{State: "idle", Msg: "补丁文件未下载", UpdatedAt: time.Now().Format(time.RFC3339)}
+		devuiDownloadStatusMu.Lock()
+		devuiDownloadStatusVar = status
+		devuiDownloadStatusMu.Unlock()
+	}
+	return status
 }
 
 func setDevuiDownloadStatus(fn func(*devuiDownloadStatus)) {
