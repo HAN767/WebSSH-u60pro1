@@ -815,7 +815,7 @@ func startDevuiScreenUpdate() error {
 	return nil
 }
 
-func stopDevuiScreenUpdate(restart bool) error {
+func stopDevuiScreenUpdate(startOriginal bool) error {
 	devuiMu.Lock()
 	if devuiStop != nil {
 		close(devuiStop)
@@ -823,15 +823,20 @@ func stopDevuiScreenUpdate(restart bool) error {
 	}
 	devuiStatus.Running = false
 	devuiMu.Unlock()
+
 	if isDevuiMounted() {
-		if out, err := exec.Command("umount", devuiMountTarget).CombinedOutput(); err != nil {
+		if err := stopDevuiService(); err != nil {
+			setDevuiLastError(err.Error())
+			return err
+		}
+		if out, err := exec.Command("umount", "-l", devuiMountTarget).CombinedOutput(); err != nil {
 			msg := fmt.Sprintf("取消挂载失败: %v %s", err, strings.TrimSpace(string(out)))
 			setDevuiLastError(msg)
 			return errors.New(msg)
 		}
 	}
-	if restart {
-		if err := restartDevuiService(); err != nil {
+	if startOriginal {
+		if err := startDevuiService(); err != nil {
 			setDevuiLastError(err.Error())
 			return err
 		}
@@ -1043,6 +1048,22 @@ func restartDevuiService() error {
 	out, err := exec.Command("/etc/init.d/zte_topsw_devui", "restart").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("重启 zte_topsw_devui 失败: %v %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func stopDevuiService() error {
+	out, err := exec.Command("/etc/init.d/zte_topsw_devui", "stop").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("停止 zte_topsw_devui 失败: %v %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func startDevuiService() error {
+	out, err := exec.Command("/etc/init.d/zte_topsw_devui", "start").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("启动 zte_topsw_devui 失败: %v %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
