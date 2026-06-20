@@ -1077,12 +1077,12 @@ func updateDevuiSpeed() {
 	if err != nil {
 		return
 	}
-	tx := stringValue(data["real_tx_speed"])
-	rx := stringValue(data["real_rx_speed"])
+	tx := cleanSpeed(stringValue(data["real_tx_speed"]))
+	rx := cleanSpeed(stringValue(data["real_rx_speed"]))
 	if tx == "" || rx == "" {
 		return
 	}
-	_ = writeAtomicFile(devuiSpeedPath, []byte(fmt.Sprintf("%s %s\n", digitsOnly(tx), digitsOnly(rx))))
+	_ = writeAtomicFile(devuiSpeedPath, []byte(fmt.Sprintf("%s %s\n", tx, rx)))
 }
 
 func buildDevuiHomeCards() {
@@ -1514,14 +1514,24 @@ func appendNRCA(lines *[]string, nrca string) {
 	}
 }
 
-func digitsOnly(s string) string {
+func cleanSpeed(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
 	var b strings.Builder
+	dotSeen := false
 	for _, r := range s {
 		if r >= '0' && r <= '9' {
 			b.WriteRune(r)
+			continue
+		}
+		if r == '.' && !dotSeen {
+			dotSeen = true
+			b.WriteRune(r)
 		}
 	}
-	return b.String()
+	return strings.TrimSuffix(b.String(), ".")
 }
 
 func SystemRcLocalGetHandler(c *gin.Context) {
