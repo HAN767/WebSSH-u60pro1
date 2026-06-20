@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1069,62 +1070,68 @@ func startDevuiService() error {
 }
 
 func updateDevuiSpeed() {
-	data, err := utils.GetDataFromUbus("zwrt_data", "get_wwandst", map[string]interface{}{
-		"source_module": "web",
-		"cid":           1,
-		"type":          4,
-	})
+	out, err := exec.Command("ubus", "call", "zwrt_data", "get_wwandst", `{"source_module":"web","cid":1,"type":4}`).Output()
 	if err != nil {
 		return
 	}
-	tx := cleanSpeed(stringValue(data["real_tx_speed"]))
-	rx := cleanSpeed(stringValue(data["real_rx_speed"]))
-	if tx == "" || rx == "" {
-		return
+	var tx, rx string
+	for _, line := range strings.Split(string(out), "\n") {
+		if devuiRealTxRe.MatchString(line) {
+			tx = devuiNonDigitRe.ReplaceAllString(line, "")
+		}
+		if devuiRealRxRe.MatchString(line) {
+			rx = devuiNonDigitRe.ReplaceAllString(line, "")
+		}
 	}
-	_ = writeAtomicFile(devuiSpeedPath, []byte(fmt.Sprintf("%s %s\n", tx, rx)))
+	if tx != "" && rx != "" {
+		_ = writeAtomicFile(devuiSpeedPath, []byte(fmt.Sprintf("%s %s\n", tx, rx)))
+	}
 }
 
 func buildDevuiHomeCards() {
-	info, err := utils.GetDataFromUbus("zte_nwinfo_api", "nwinfo_get_netinfo", map[string]interface{}{})
+	out, err := exec.Command("ubus", "call", "zte_nwinfo_api", "nwinfo_get_netinfo", "{}").Output()
 	if err != nil {
 		return
 	}
+	jsonText := string(out)
+	if jsonText == "" {
+		return
+	}
 
-	provider := stringValue(info["network_provider"])
-	mode := stringValue(info["network_type"])
-	wanBand := stringValue(info["wan_active_band"])
-	nrca := stringValue(info["nrca"])
-	lteca := stringValue(info["lteca"])
+	provider := devuiJSONGet(jsonText, "network_provider")
+	mode := devuiJSONGet(jsonText, "network_type")
+	wanBand := devuiJSONGet(jsonText, "wan_active_band")
+	nrca := devuiJSONGet(jsonText, "nrca")
+	lteca := devuiJSONGet(jsonText, "lteca")
 
 	modeU := strings.ToUpper(mode)
 	wanBandU := strings.ToUpper(wanBand)
-	isLTE := strings.Contains(modeU, "LTE") || strings.Contains(wanBandU, "LTE")
+	isLTE := strings.Contains(modeU, "LTE") || strings.HasPrefix(wanBandU, "LTE")
 
 	var band, pci, freq, bw string
 	var rsrp, rsrq, sinr, rssi string
 	if isLTE {
 		band = compactBand(wanBand)
-		pci = stringValue(info["lte_pci"])
-		freq = stringValue(info["wan_active_channel"])
+		pci = devuiJSONGet(jsonText, "lte_pci")
+		freq = devuiJSONGet(jsonText, "wan_active_channel")
 		bw = lteBWFromCA(lteca)
-		rsrp = stringValue(info["lte_rsrp"])
-		rsrq = stringValue(info["lte_rsrq"])
-		sinr = stringValue(info["lte_snr"])
-		rssi = stringValue(info["lte_rssi"])
+		rsrp = devuiJSONGet(jsonText, "lte_rsrp")
+		rsrq = devuiJSONGet(jsonText, "lte_rsrq")
+		sinr = devuiJSONGet(jsonText, "lte_snr")
+		rssi = devuiJSONGet(jsonText, "lte_rssi")
 	} else {
-		band = stringValue(info["nr5g_action_band"])
+		band = devuiJSONGet(jsonText, "nr5g_action_band")
 		if band == "" {
 			band = wanBand
 		}
 		band = compactBand(band)
-		pci = stringValue(info["nr5g_pci"])
-		freq = stringValue(info["nr5g_action_channel"])
-		bw = stringValue(info["nr5g_bandwidth"])
-		rsrp = stringValue(info["nr5g_rsrp"])
-		rsrq = stringValue(info["nr5g_rsrq"])
-		sinr = stringValue(info["nr5g_snr"])
-		rssi = stringValue(info["nr5g_rssi"])
+		pci = devuiJSONGet(jsonText, "nr5g_pci")
+		freq = devuiJSONGet(jsonText, "nr5g_action_channel")
+		bw = devuiJSONGet(jsonText, "nr5g_bandwidth")
+		rsrp = devuiJSONGet(jsonText, "nr5g_rsrp")
+		rsrq = devuiJSONGet(jsonText, "nr5g_rsrq")
+		sinr = devuiJSONGet(jsonText, "nr5g_snr")
+		rssi = devuiJSONGet(jsonText, "nr5g_rssi")
 	}
 
 	provider = fallbackDash(provider)
@@ -1142,45 +1149,97 @@ func buildDevuiHomeCards() {
 	if bw != "--" {
 		bwText = bw + "M"
 	}
-	freqLabel := "频点"
-	if isLTE {
-		freqLabel = "信道"
-	}
-
-	lines := []string{
-		"RSRP", gradeSignal(rsrp, "rsrp"), rsrp + " dBm",
-		"RSRQ", gradeSignal(rsrq, "rsrq"), rsrq + " dB",
-		"SINR", gradeSignal(sinr, "sinr"), sinr + " dB",
-		"RSSI", gradeSignal(rssi, "rssi"), rssi + " dBm",
-		"PCI", "频段", freqLabel, "带宽", "RSRP", "SINR",
-		pci, band, freq, bwText, rsrp, sinr,
-	}
-	_ = provider
-	_ = mode
-
-	if isLTE {
-		appendLTECA(&lines, lteca, pci, freq)
-	} else {
-		appendNRCA(&lines, nrca)
-	}
-	for len(lines) < 36 {
-		lines = append(lines, "-")
-	}
-	if len(lines) > 36 {
-		lines = lines[:36]
-	}
-	lines = append(lines,
-		strconv.Itoa(signalBarWidth(rsrp, "rsrp")),
-		strconv.Itoa(signalBarWidth(rsrq, "rsrq")),
-		strconv.Itoa(signalBarWidth(sinr, "sinr")),
-		strconv.Itoa(signalBarWidth(rssi, "rssi")),
-	)
 
 	var b strings.Builder
-	for _, line := range lines {
-		b.WriteString(line)
+	writeLine := func(s string) {
+		b.WriteString(s)
 		b.WriteByte('\n')
 	}
+	writeLine("RSRP")
+	writeLine(gradeSignal(rsrp, "rsrp"))
+	writeLine(rsrp + " dBm")
+	writeLine("RSRQ")
+	writeLine(gradeSignal(rsrq, "rsrq"))
+	writeLine(rsrq + " dB")
+	writeLine("SINR")
+	writeLine(gradeSignal(sinr, "sinr"))
+	writeLine(sinr + " dB")
+	writeLine("RSSI")
+	writeLine(gradeSignal(rssi, "rssi"))
+	writeLine(rssi + " dBm")
+	writeLine("PCI")
+	writeLine("频段")
+	if isLTE {
+		writeLine("信道")
+	} else {
+		writeLine("频点")
+	}
+	writeLine("带宽")
+	writeLine("RSRP")
+	writeLine("SINR")
+	writeLine(pci)
+	writeLine(band)
+	writeLine(freq)
+	writeLine(bwText)
+	writeLine(rsrp)
+	writeLine(sinr)
+
+	if isLTE {
+		count := 0
+		skipped := false
+		for _, line := range strings.Split(lteca, ";") {
+			if count >= 2 {
+				break
+			}
+			fields := strings.Split(line, ",")
+			if len(fields) < 5 {
+				continue
+			}
+			if !skipped && fields[0] == pci && fields[3] == freq {
+				skipped = true
+				continue
+			}
+			count++
+			writeLine(fields[0])
+			writeLine("B" + fields[1])
+			writeLine(fields[3])
+			writeLine(fields[4] + "M")
+			writeLine("-")
+			writeLine("-")
+		}
+	} else {
+		count := 0
+		for _, line := range strings.Split(nrca, ";") {
+			if count >= 2 {
+				break
+			}
+			fields := strings.Split(line, ",")
+			if len(fields) < 11 {
+				continue
+			}
+			count++
+			writeLine(fields[1])
+			writeLine("N" + fields[3])
+			writeLine(fields[4])
+			writeLine(fields[5] + "M")
+			writeLine(devuiStripDotZero(fields[7]))
+			writeLine(devuiStripDotZero(fields[9]))
+		}
+	}
+
+	lines := strings.Count(b.String(), "\n")
+	for lines < 36 {
+		writeLine("-")
+		lines++
+	}
+
+	writeLine(strconv.Itoa(signalBarWidth(rsrp, "rsrp")))
+	writeLine(strconv.Itoa(signalBarWidth(rsrq, "rsrq")))
+	writeLine(strconv.Itoa(signalBarWidth(sinr, "sinr")))
+	writeLine(strconv.Itoa(signalBarWidth(rssi, "rssi")))
+
+	_ = provider
+	_ = mode
 	_ = writeAtomicFile(devuiHomeCardsPath, []byte(b.String()))
 }
 
@@ -1340,15 +1399,43 @@ func fallbackDash(value string) string {
 	return value
 }
 
+var devuiFmtNumRe = regexp.MustCompile(`^-?[0-9]+\.0+$`)
+var devuiRealTxRe = regexp.MustCompile(`"real_tx_speed"`)
+var devuiRealRxRe = regexp.MustCompile(`"real_rx_speed"`)
+var devuiNonDigitRe = regexp.MustCompile(`[^0-9]`)
+var devuiDotZeroRe = regexp.MustCompile(`\.0+$`)
+
+func devuiJSONGet(jsonText string, key string) string {
+	pattern := `"` + key + `":`
+	pos := strings.Index(jsonText, pattern)
+	if pos < 0 {
+		return ""
+	}
+	value := strings.TrimLeft(jsonText[pos+len(pattern):], " \t\r\n")
+	if len(value) > 0 && value[0] == '"' {
+		value = value[1:]
+		if end := strings.IndexByte(value, '"'); end >= 0 {
+			return value[:end]
+		}
+		return value
+	}
+	if end := strings.IndexAny(value, ",}"); end >= 0 {
+		value = value[:end]
+	}
+	return strings.TrimSpace(value)
+}
+
+func devuiStripDotZero(value string) string {
+	return devuiDotZeroRe.ReplaceAllString(value, "")
+}
+
 func fmtNum(value string) string {
-	value = strings.TrimSpace(value)
 	if value == "" || value == "--" {
 		return "--"
 	}
-	if strings.Contains(value, ".") {
-		f, err := strconv.ParseFloat(value, 64)
-		if err == nil && f == float64(int64(f)) {
-			return strconv.FormatInt(int64(f), 10)
+	if devuiFmtNumRe.MatchString(value) {
+		if idx := strings.IndexByte(value, '.'); idx >= 0 {
+			return value[:idx]
 		}
 	}
 	return value
