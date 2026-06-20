@@ -1217,6 +1217,9 @@ func buildDevuiHomeCards() {
 			if len(fields) < 5 {
 				continue
 			}
+			if !validPCI(fields[0]) {
+				continue
+			}
 			if !skipped && fields[0] == pci && fields[3] == freq {
 				skipped = true
 				continue
@@ -1233,23 +1236,25 @@ func buildDevuiHomeCards() {
 		count := 0
 		// NSA：把 LTE 锚点作为第一条 CA 行（NR 为主卡，LTE 作辅助）。
 		if isNSA {
-			lband := compactBand(wanBand)
-			lpci := fallbackDash(devuiJSONGet(jsonText, "lte_pci"))
-			lfreq := fallbackDash(devuiJSONGet(jsonText, "wan_active_channel"))
-			lbw := lteBWFromCA(lteca)
-			lbwText := "-"
-			if lbw != "" {
-				lbwText = lbw + "M"
+			lpci := devuiJSONGet(jsonText, "lte_pci")
+			if validPCI(lpci) {
+				lband := compactBand(wanBand)
+				lfreq := fallbackDash(devuiJSONGet(jsonText, "wan_active_channel"))
+				lbw := lteBWFromCA(lteca)
+				lbwText := "-"
+				if lbw != "" {
+					lbwText = lbw + "M"
+				}
+				lrsrp := fmtNum(fallbackDash(devuiJSONGet(jsonText, "lte_rsrp")))
+				lsinr := fmtNum(fallbackDash(devuiJSONGet(jsonText, "lte_snr")))
+				writeLine(lpci)
+				writeLine(lband)
+				writeLine(lfreq)
+				writeLine(lbwText)
+				writeLine(lrsrp)
+				writeLine(lsinr)
+				count++
 			}
-			lrsrp := fmtNum(fallbackDash(devuiJSONGet(jsonText, "lte_rsrp")))
-			lsinr := fmtNum(fallbackDash(devuiJSONGet(jsonText, "lte_snr")))
-			writeLine(lpci)
-			writeLine(lband)
-			writeLine(lfreq)
-			writeLine(lbwText)
-			writeLine(lrsrp)
-			writeLine(lsinr)
-			count++
 		}
 		for _, line := range strings.Split(nrca, ";") {
 			if count >= 2 {
@@ -1257,6 +1262,9 @@ func buildDevuiHomeCards() {
 			}
 			fields := strings.Split(line, ",")
 			if len(fields) < 11 {
+				continue
+			}
+			if !validPCI(fields[1]) {
 				continue
 			}
 			count++
@@ -1469,6 +1477,17 @@ func devuiJSONGet(jsonText string, key string) string {
 
 func devuiStripDotZero(value string) string {
 	return devuiDotZeroRe.ReplaceAllString(value, "")
+}
+
+// validPCI 判断 CA 列的 PCI 是否有效，过滤切换瞬间的残值列。
+// 空、"-"、"--" 或无法解析为数字，均视为无效。
+func validPCI(value string) bool {
+	v := strings.TrimSpace(value)
+	if v == "" || v == "-" || v == "--" {
+		return false
+	}
+	_, err := strconv.ParseFloat(v, 64)
+	return err == nil
 }
 
 func fmtNum(value string) string {
