@@ -1144,7 +1144,7 @@
           <el-button :icon="RefreshIcon" @click="loadMmStatus" :loading="mmLoadingStatus">刷新</el-button>
         </div>
         <transition name="el-fade-in">
-          <pre v-if="mmControlOutput" class="mh-output">{{ mmControlOutput }}</pre>
+          <pre v-if="mmControlOutput" ref="mmControlOutputEl" class="mh-output">{{ mmControlOutput }}</pre>
         </transition>
 
         <!-- 开机自启 -->
@@ -1875,7 +1875,7 @@ import NetworkIcon from '@/assets/svgs/network.svg';
 import { Refresh as RefreshIcon } from '@element-plus/icons-vue';
 import axios from 'axios';
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus';
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 
 // interface UbusResponse<T = any> {
 //   code: number;
@@ -4374,6 +4374,7 @@ const mmActiveTab = ref('overview')
 const mmLoadingStatus = ref(false)
 const mmControlling = ref('')
 const mmControlOutput = ref('')
+const mmControlOutputEl = ref<HTMLElement | null>(null)
 const mmCheckingVersion = ref(false)
 const mmBinaryChecking = ref(false)
 const mmConfigLoading = ref(false)
@@ -4544,6 +4545,7 @@ async function mmControl(action: string) {
   mmControlSource.addEventListener('line', (event: MessageEvent) => {
     const data = JSON.parse(event.data)
     mmControlOutput.value += `${data.line}\n`
+    scrollMmControlOutputToBottom()
   })
 
   mmControlSource.addEventListener('done', async (event: MessageEvent) => {
@@ -4559,6 +4561,7 @@ async function mmControl(action: string) {
         mmControlOutput.value = data.output
       } else if (data.msg && !mmControlOutput.value.includes(data.msg)) {
         mmControlOutput.value += `\n${data.msg}`
+        scrollMmControlOutputToBottom()
       }
     }
     await loadMmStatus()
@@ -4578,6 +4581,13 @@ function stopMmControlStream() {
   if (mmControlSource) {
     mmControlSource.close()
     mmControlSource = null
+  }
+}
+
+async function scrollMmControlOutputToBottom() {
+  await nextTick()
+  if (mmControlOutputEl.value) {
+    mmControlOutputEl.value.scrollTop = mmControlOutputEl.value.scrollHeight
   }
 }
 

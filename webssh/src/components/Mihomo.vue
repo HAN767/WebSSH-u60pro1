@@ -30,7 +30,7 @@
       <!-- 控制命令输出 -->
       <el-collapse-transition>
         <div v-if="controlOutput" style="margin-top: 12px">
-          <pre class="output-box">{{ controlOutput }}</pre>
+          <pre ref="controlOutputEl" class="output-box">{{ controlOutput }}</pre>
         </div>
       </el-collapse-transition>
     </el-card>
@@ -112,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
@@ -188,6 +188,7 @@ const updateStatus = reactive<UpdateStatus>({
 const loadingStatus = ref(false)
 const controlling = ref('')
 const controlOutput = ref('')
+const controlOutputEl = ref<HTMLElement | null>(null)
 const checkingVersion = ref(false)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -245,6 +246,7 @@ async function control(action: string) {
   controlSource.addEventListener('line', (event: MessageEvent) => {
     const data = JSON.parse(event.data)
     controlOutput.value += `${data.line}\n`
+    scrollControlOutputToBottom()
   })
 
   controlSource.addEventListener('done', async (event: MessageEvent) => {
@@ -260,6 +262,7 @@ async function control(action: string) {
         controlOutput.value = data.output
       } else if (data.msg && !controlOutput.value.includes(data.msg)) {
         controlOutput.value += `\n${data.msg}`
+        scrollControlOutputToBottom()
       }
     }
     await loadStatus()
@@ -279,6 +282,13 @@ function stopControlStream() {
   if (controlSource) {
     controlSource.close()
     controlSource = null
+  }
+}
+
+async function scrollControlOutputToBottom() {
+  await nextTick()
+  if (controlOutputEl.value) {
+    controlOutputEl.value.scrollTop = controlOutputEl.value.scrollHeight
   }
 }
 
