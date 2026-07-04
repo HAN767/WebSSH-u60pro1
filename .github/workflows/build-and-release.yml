@@ -83,44 +83,31 @@ jobs:
           go-version: '1.24.x'
 
       # 6.5 CGO ARM64 musl 交叉编译工具链
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.13.0
+      - name: Install OpenWrt ARM64 musl toolchain
+        run: |
+          curl -L https://downloads.openwrt.org/releases/22.03.5/targets/armvirt/64/openwrt-toolchain-22.03.5-armvirt-64_gcc-11.2.0_musl.Linux-x86_64.tar.xz -o /tmp/openwrt-toolchain.tar.xz
+          sudo tar -C /opt -xJf /tmp/openwrt-toolchain.tar.xz
+          echo "/opt/openwrt-toolchain-22.03.5-armvirt-64_gcc-11.2.0_musl.Linux-x86_64/toolchain-aarch64_cortex-a53_gcc-11.2.0_musl/bin" >> $GITHUB_PATH
+          /opt/openwrt-toolchain-22.03.5-armvirt-64_gcc-11.2.0_musl.Linux-x86_64/toolchain-aarch64_cortex-a53_gcc-11.2.0_musl/bin/aarch64-openwrt-linux-musl-gcc --version
 
       # 7. 构建 Go（二进制 + 内嵌版本）
       - name: Build Go binary
         run: |
           cd gossh
 
-          cat > /tmp/aarch64-linux-musl-cc <<'EOF'
-          #!/bin/sh
-          exec zig cc -target aarch64-linux-musl -dynamic "$@"
-          EOF
-          chmod +x /tmp/aarch64-linux-musl-cc
-
           export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=arm64
-          export CC=/tmp/aarch64-linux-musl-cc
+          export CC=aarch64-openwrt-linux-musl-gcc
 
           go env -w GOPROXY=https://goproxy.cn,direct
           go mod tidy
 
-          go build -trimpath -ldflags="-s -w -linkmode external -extldflags '-dynamic' -X main.version=${VERSION}" -o webssh_${VERSION}
+          go build -trimpath -ldflags="-s -w -linkmode external -extldflags '-Wl,-dynamic-linker,/lib/ld-musl-aarch64.so.1' -X main.version=${VERSION}" -o webssh_${VERSION}
           file webssh_${VERSION}
           readelf -l webssh_${VERSION} | grep 'interpreter' || true
 
-      # 8. UPX 压缩（可选）
-      - name: Install UPX
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y upx-ucl || sudo apt-get install -y upx
-
-      - name: Compress binary
-        run: |
-          cd gossh
-          upx --best --lzma webssh_${VERSION} || true
+      # 8. UPX 压缩（CGO + dlopen 版本先不压缩，避免影响动态加载排查）
       
       # 9. 生成 version.txt
       - name: Generate version file
