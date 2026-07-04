@@ -34,7 +34,7 @@ jobs:
       - name: Generate changelog
         run: |
           # 此时本次的 tag 还没创建，所以最新已有 tag 就是上一个版本
-          PREV_TAG=$(git tag --list | sort -r | head -n 1)
+          PREV_TAG=$(git tag --list '20[0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]' | sort -r | head -n 1)
           BUILD_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           {
             echo "## ${VERSION}"
