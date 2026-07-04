@@ -82,11 +82,13 @@ jobs:
         with:
           go-version: '1.24.x'
 
-      # 6.5 CGO ARM64 交叉编译工具链
-      - name: Install ARM64 CGO toolchain
+      # 6.5 CGO ARM64 musl 交叉编译工具链
+      - name: Install ARM64 musl CGO toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          curl -L https://musl.cc/aarch64-linux-musl-cross.tgz -o /tmp/aarch64-linux-musl-cross.tgz
+          sudo tar -C /opt -xzf /tmp/aarch64-linux-musl-cross.tgz
+          echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+          /opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc --version
 
       # 7. 构建 Go（二进制 + 内嵌版本）
       - name: Build Go binary
@@ -96,12 +98,14 @@ jobs:
           export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=arm64
-          export CC=aarch64-linux-gnu-gcc
+          export CC=aarch64-linux-musl-gcc
 
           go env -w GOPROXY=https://goproxy.cn,direct
           go mod tidy
 
           go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o webssh_${VERSION}
+          file webssh_${VERSION}
+          readelf -l webssh_${VERSION} | grep 'interpreter' || true
 
       # 8. UPX 压缩（可选）
       - name: Install UPX
