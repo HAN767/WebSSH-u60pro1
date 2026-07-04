@@ -95,7 +95,7 @@ jobs:
 
           cat > /tmp/aarch64-linux-musl-cc <<'EOF'
           #!/bin/sh
-          exec zig cc -target aarch64-linux-musl "$@"
+          exec zig cc -target aarch64-linux-musl -dynamic "$@"
           EOF
           chmod +x /tmp/aarch64-linux-musl-cc
 
@@ -107,7 +107,7 @@ jobs:
           go env -w GOPROXY=https://goproxy.cn,direct
           go mod tidy
 
-          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o webssh_${VERSION}
+          go build -trimpath -ldflags="-s -w -linkmode external -extldflags '-dynamic' -X main.version=${VERSION}" -o webssh_${VERSION}
           file webssh_${VERSION}
           readelf -l webssh_${VERSION} | grep 'interpreter' || true
 
