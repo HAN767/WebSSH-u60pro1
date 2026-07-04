@@ -99,6 +99,7 @@ jobs:
           export GOOS=linux
           export GOARCH=arm64
           export CC=aarch64-openwrt-linux-musl-gcc
+          export STAGING_DIR=/opt/openwrt-toolchain-22.03.5-armvirt-64_gcc-11.2.0_musl.Linux-x86_64
 
           go env -w GOPROXY=https://goproxy.cn,direct
           go mod tidy
