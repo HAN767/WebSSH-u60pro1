@@ -107,7 +107,16 @@ jobs:
           file webssh_${VERSION}
           readelf -l webssh_${VERSION} | grep 'interpreter' || true
 
-      # 8. UPX 压缩（CGO + dlopen 版本先不压缩，避免影响动态加载排查）
+      # 8. UPX 压缩（可选）
+      - name: Install UPX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y upx-ucl || sudo apt-get install -y upx
+
+      - name: Compress binary
+        run: |
+          cd gossh
+          upx --best --lzma webssh_${VERSION} || true
       
       # 9. 生成 version.txt
       - name: Generate version file
