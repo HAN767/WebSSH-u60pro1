@@ -65,9 +65,9 @@ func BuildNVConfigINI(digits string) ([]byte, string, error) {
 
 	parts := make([]string, 0, 9)
 	parts = append(parts, "0x08")
-	parts = append(parts, fmt.Sprintf("0x%cA", digits[0]))
+	parts = append(parts, fmt.Sprintf("0xA%c", digits[0]))
 	for i := 1; i < len(digits); i += 2 {
-		parts = append(parts, fmt.Sprintf("0x%c%c", digits[i], digits[i+1]))
+		parts = append(parts, fmt.Sprintf("0x%c%c", digits[i+1], digits[i]))
 	}
 	par := strings.Join(parts, ",")
 	ini := fmt.Sprintf(`[NV_SYS0]
