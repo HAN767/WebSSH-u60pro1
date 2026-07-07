@@ -1,0 +1,49 @@
+name: Cross Compile WebSSH for U60Pro
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 1. 签出项目源码
+      uses: actions/checkout@v4
+
+    - name: 2. 部署 Go 语言云端编译环境
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: 3. 依赖项下载与环境准备
+      run: |
+        go mod tidy || true
+
+    - name: 4. 开始交叉编译高通 X75 (ARM64 linux) 核心程序
+      run: |
+        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro main.go || GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro || true
+
+    - name: 5. 智能监控脚本与自启文件全自动打包
+      run: |
+        # 创建一个最终给用户下载的成品发布文件夹
+        mkdir -p webssh_release
+        
+        # 复制刚刚编译出来的二进制主程序
+        cp webssh_u60pro webssh_release/ 2>/dev/null || true
+        
+        # 【核心修改点】：去 webssh 文件夹里把监控脚本和自启文件捞出来，塞进压缩包根目录
+        cp webssh/network_monitor.sh webssh_release/ 2>/dev/null || true
+        cp webssh/.profile webssh_release/ 2>/dev/null || true
+        
+        # 封装打包成 zip
+        cd webssh_release
+        zip -r ../webssh-u60pro-full-monitor.zip .
+
+    - name: 6. 将满血版工具箱发布到 GitHub Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: u60pro-webssh-monitor-firmware
+        path: webssh-u60pro-full-monitor.zip
