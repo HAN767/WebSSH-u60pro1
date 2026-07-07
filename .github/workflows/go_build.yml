@@ -22,23 +22,23 @@ jobs:
       run: |
         go mod tidy || true
 
-    - name: 4. 开始交叉编译高通 X75 (ARM64 linux) 核心程序
+    - name: 4. 盲搜并编译所有 Go 源码 (强行生成主程序)
       run: |
-        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro main.go || GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro || true
+        # 这一步会自动扫描当前目录下的所有Go代码，不管它叫 install.go 还是 main.go，强行编译成 webssh_u60pro
+        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro . || GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro *.go || true
 
     - name: 5. 智能监控脚本与自启文件全自动打包
       run: |
-        # 创建一个最终给用户下载的成品发布文件夹
         mkdir -p webssh_release
         
-        # 复制刚刚编译出来的二进制主程序
+        # 1. 把刚刚强行编译出来的核心主程序放进去
         cp webssh_u60pro webssh_release/ 2>/dev/null || true
         
-        # 【核心修改点】：去 webssh 文件夹里把监控脚本和自启文件捞出来，塞进压缩包根目录
+        # 2. 去 webssh 文件夹里把监控脚本和自启文件捞出来，塞进压缩包
         cp webssh/network_monitor.sh webssh_release/ 2>/dev/null || true
         cp webssh/.profile webssh_release/ 2>/dev/null || true
         
-        # 封装打包成 zip
+        # 3. 封装打包成 zip
         cd webssh_release
         zip -r ../webssh-u60pro-full-monitor.zip .
 
