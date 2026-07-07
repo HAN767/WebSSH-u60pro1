@@ -22,21 +22,21 @@ jobs:
       run: |
         go mod tidy || true
 
-    - name: 4. 盲搜并编译所有 Go 源码 (强行生成主程序)
+    - name: 4. 编译核心主程序
       run: |
-        # 这一步会自动扫描当前目录下的所有Go代码，不管它叫 install.go 还是 main.go，强行编译成 webssh_u60pro
+        # 强行编译出核心主程序
         GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro . || GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro *.go || true
 
-    - name: 5. 智能监控脚本与自启文件全自动打包
+    - name: 5. 全盘搜刮文件并打包 (核心修复)
       run: |
         mkdir -p webssh_release
         
-        # 1. 把刚刚强行编译出来的核心主程序放进去
+        # 1. 抓取主程序
         cp webssh_u60pro webssh_release/ 2>/dev/null || true
         
-        # 2. 去 webssh 文件夹里把监控脚本和自启文件捞出来，塞进压缩包
-        cp webssh/network_monitor.sh webssh_release/ 2>/dev/null || true
-        cp webssh/.profile webssh_release/ 2>/dev/null || true
+        # 2. 不管你在哪里，全盘盲搜 network_monitor.sh 和 .profile 并抓进压缩包
+        find . -name "network_monitor.sh" -exec cp {} webssh_release/ \; 2>/dev/null || true
+        find . -name ".profile" -exec cp {} webssh_release/ \; 2>/dev/null || true
         
         # 3. 封装打包成 zip
         cd webssh_release
