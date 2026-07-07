@@ -1,4 +1,4 @@
-name: Cross Compile WebSSH for U60Pro
+name: Pack WebSSH for U60Pro
 
 on:
   push:
@@ -13,44 +13,31 @@ jobs:
     - name: 1. 签出项目源码
       uses: actions/checkout@v4
 
-    - name: 2. 部署 Go 语言云端编译环境
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.21'
-
-    - name: 3. 依赖项下载与环境准备
+    - name: 2. 彻底清理 Git 内部垃圾文件 (防止打包错误缓存)
       run: |
-        go mod tidy || true
+        rm -rf .git
+        rm -rf .github
 
-    - name: 4. 地毯式编译 (尝试所有可能的Go文件)
-      run: |
-        # 尝试各种编译组合，强行在当前目录生成可执行程序
-        go build -ldflags="-s -w" -o webssh_u60pro . || true
-        go build -ldflags="-s -w" -o webssh_u60pro main.go || true
-        go build -ldflags="-s -w" -o webssh_u60pro install.go || true
-        # 如果作者用了原厂默认编译，挪动它
-        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro || true
-
-    - name: 5. 暴力打包 (抓取全盘所有可执行文件和脚本)
+    - name: 3. 精准收集有用文件并打包
       run: |
         mkdir -p webssh_release
         
-        # 1. 抓取我们尝试编译出的主程序
-        cp webssh_u60pro webssh_release/ 2>/dev/null || true
-        
-        # 2. 【核心暴力抓取】：把原作者项目里编译出来的、或者原本就有的所有无后缀二进制文件也一起抓进来
-        find . -maxdepth 2 -type f ! -name "*.*" -exec cp {} webssh_release/ \; 2>/dev/null || true
-        
-        # 3. 搜刮我们放进去的监控脚本和自启文件
+        # 1. 不管监控脚本和自启文件藏在哪，抓到打包根目录
         find . -name "network_monitor.sh" -exec cp {} webssh_release/ \; 2>/dev/null || true
         find . -name ".profile" -exec cp {} webssh_release/ \; 2>/dev/null || true
         
-        # 4. 封装打包成 zip
+        # 2. 强行把原作者项目里的核心内容（html网页、静态文件、mihomo内核等）一起复制过去
+        # 排除掉我们创建的临时目录本身
+        cp -r [a-zA-Z0-9]* webssh_release/ 2>/dev/null || true
+        
+        # 3. 封装打包成 zip
         cd webssh_release
-        zip -r ../webssh-u60pro-full-monitor.zip .
+        # 再次确保删除可能遗留的垃圾
+        rm -rf .git .github webssh_release 2>/dev/null || true
+        zip -r ../webssh-u60pro-final.zip .
 
-    - name: 6. 将工具箱发布到 GitHub Artifacts
+    - name: 4. 将满血版工具箱发布到 GitHub
       uses: actions/upload-artifact@v4
       with:
         name: u60pro-webssh-monitor-firmware
-        path: webssh-u60pro-full-monitor.zip
+        path: webssh-u60pro-final.zip
