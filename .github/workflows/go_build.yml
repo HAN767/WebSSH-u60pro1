@@ -22,27 +22,34 @@ jobs:
       run: |
         go mod tidy || true
 
-    - name: 4. 编译核心主程序
+    - name: 4. 地毯式编译 (尝试所有可能的Go文件)
       run: |
-        # 强行编译出核心主程序
-        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro . || GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro *.go || true
+        # 尝试各种编译组合，强行在当前目录生成可执行程序
+        go build -ldflags="-s -w" -o webssh_u60pro . || true
+        go build -ldflags="-s -w" -o webssh_u60pro main.go || true
+        go build -ldflags="-s -w" -o webssh_u60pro install.go || true
+        # 如果作者用了原厂默认编译，挪动它
+        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o webssh_u60pro || true
 
-    - name: 5. 全盘搜刮文件并打包 (核心修复)
+    - name: 5. 暴力打包 (抓取全盘所有可执行文件和脚本)
       run: |
         mkdir -p webssh_release
         
-        # 1. 抓取主程序
+        # 1. 抓取我们尝试编译出的主程序
         cp webssh_u60pro webssh_release/ 2>/dev/null || true
         
-        # 2. 不管你在哪里，全盘盲搜 network_monitor.sh 和 .profile 并抓进压缩包
+        # 2. 【核心暴力抓取】：把原作者项目里编译出来的、或者原本就有的所有无后缀二进制文件也一起抓进来
+        find . -maxdepth 2 -type f ! -name "*.*" -exec cp {} webssh_release/ \; 2>/dev/null || true
+        
+        # 3. 搜刮我们放进去的监控脚本和自启文件
         find . -name "network_monitor.sh" -exec cp {} webssh_release/ \; 2>/dev/null || true
         find . -name ".profile" -exec cp {} webssh_release/ \; 2>/dev/null || true
         
-        # 3. 封装打包成 zip
+        # 4. 封装打包成 zip
         cd webssh_release
         zip -r ../webssh-u60pro-full-monitor.zip .
 
-    - name: 6. 将满血版工具箱发布到 GitHub Artifacts
+    - name: 6. 将工具箱发布到 GitHub Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: u60pro-webssh-monitor-firmware
